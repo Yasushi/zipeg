@@ -1,10 +1,6 @@
 #summary Frequently Asked Questions
 #labels Featured
 
-= Introduction =
-
-Frequently Asked Questions
-
 == How to install Zipeg ==
 
  * On Windows: just download and run installed.
