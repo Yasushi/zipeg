@@ -17,7 +17,7 @@ It is good idea to use Zipeg Options /Settings or Zipeg / Preferences to disasso
 
 == How to open multi-part archive? or ("How do I open folder with RAR/Zip files?") ==
 
-Mutli-part (aka multi-volume) archives are usually spread over sequence of files like:
+Multi-part (aka multi-volume) archives are usually spread over sequence of files like:
 {{{
     file.part1.rar
     file.part2.rar
