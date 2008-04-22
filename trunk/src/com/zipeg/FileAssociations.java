@@ -83,6 +83,18 @@ public class FileAssociations extends JPanel {
                 }
             });
         }});
+        buttons.add(new JButton("None") {{
+            addActionListener(new ActionListener(){
+                public void actionPerformed(ActionEvent e) {
+                    for (int i = 0; i < cbx.length; i++) {
+                        cbx[i].setSelected(false);
+                    }
+                    if (ok != null) {
+                        ok.requestFocus();
+                    }
+                }
+            });
+        }});
         if (apply) {
             buttons.add(Box.createHorizontalStrut(96));
             ok = new JButton("OK") {{
@@ -162,10 +174,11 @@ public class FileAssociations extends JPanel {
             FileAssociations ui = new FileAssociations();
             ui.create(selected, true);
             dlg.setContentPane(ui);
+            if (Util.isMac() && Util.getJavaVersion() >= 1.6) {
+                dlg.getRootPane().putClientProperty("apple.awt.documentModalSheet", "true");
+            }
             dlg.pack();
             dlg.setResizable(false);
-            dlg.setLocationRelativeTo(dlg.getParent());
-            dlg.setModal(true);
             dlg.setVisible(true);
             if (!ui.isCanceled()) {
                 if (ui.getSelected() == 0) {
@@ -175,6 +188,7 @@ public class FileAssociations extends JPanel {
             } else {
                 Presets.putBoolean("FileAssociations:willinglyNone", true);
             }
+            Presets.sync();
         }
     }
 

@@ -40,7 +40,7 @@ public class Registry implements FileAssociationHandler {
     public long shellExecute(long mask, String verb, String file, String params, String dir) {
         return shellExec(mask, verb, file, params, dir);
     }
-    
+
     public static void moveFileToRecycleBin(String abspathname) throws IOException {
         loadLibrary();
         moveToRecycleBin(abspathname);
@@ -57,7 +57,7 @@ public class Registry implements FileAssociationHandler {
             if ((flag & selected) != (flag & was)) {
                 String ext = "." + ext2uti[i][0];
                 if (ext.equalsIgnoreCase(".chm")) {
-                    continue; // do not associate with chm! 
+                    continue; // do not associate with chm!
                 }
                 String set = null;
                 String current = getHandler(ext);
@@ -65,6 +65,7 @@ public class Registry implements FileAssociationHandler {
                     // save existing:
                     if (current != null && !"".equals(current) && !ZIPEG.equals(current)) {
                         Presets.put("Registry.Handler:" + ext, current);
+                        Presets.sync();
                     }
                     if (!ZIPEG.equals(current)) {
                         set = ZIPEG;
@@ -330,6 +331,21 @@ public class Registry implements FileAssociationHandler {
         command.put("", "\"" + exe + "\" \"%1\"");
         command.close();
         action.close();
+/*      TODO: implement me
+        action = shell.create("open.zipeg.extract.to");
+        action.put("", "Zipeg: Extract to ...");
+        command = action.create("command");
+        command.put("", "\"" + exe + "\" --extract-to \"%1\"");
+        command.close();
+        action.close();
+
+        action = shell.create("open.zipeg.extract.here");
+        action.put("", "Zipeg: Extract here");
+        command = action.create("command");
+        command.put("", "\"" + exe + "\" --extract-here \"%1\"");
+        command.close();
+        action.close();
+*/
         shell.close();
     }
 
@@ -443,9 +459,11 @@ public class Registry implements FileAssociationHandler {
 
         // Legacy way of doing it:
         zipeg = Key.CLASSES_ROOT.create("Zipeg");
-        createDefaultIcon(zipeg, exe);
-        createShellCommands(zipeg, exe);
-        zipeg.close();
+        if (zipeg != null) {
+            createDefaultIcon(zipeg, exe);
+            createShellCommands(zipeg, exe);
+            zipeg.close();
+        }
 
         classes = Key.LOCAL_MACHINE.open("SOFTWARE\\Classes");
         zipeg = classes.create("Zipeg");
@@ -453,6 +471,14 @@ public class Registry implements FileAssociationHandler {
         createShellCommands(zipeg, exe);
         zipeg.close();
         classes.close();
+
+        try {
+            // http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=5097859
+            Key js = Key.LOCAL_MACHINE.open("SOFTWARE\\JavaSoft");
+            js.create("Prefs");
+        } catch (Throwable x) {
+            /* ignore */
+        }
         return true;
     }
 
@@ -495,10 +521,10 @@ public class Registry implements FileAssociationHandler {
             }
             return new Long(v);
         } else if (type[0] == REG_SZ || type[0] == REG_EXPAND_SZ) {
-            if (data.length == 1 && (data[0] == 0 || data[0] == '@')) {
+            if (data.length == 1 && (data[0] == 0 || data[0] == '@' || data[0] == 0x20)) {
                 return "";
             }
-            assert data.length % 2 == 0 : subkey + " len=" + data.length + " type=" + type[0] +
+            assert data.length % 2 == 0 : "\"" + subkey + "\" len=" + data.length + " type=" + type[0] +
                     " data[0]=0x" + Integer.toHexString(data[0]);
             int len = data.length;
             while (len >= 2 && data.length > 2 && data[len - 1] == 0 && data[len - 2] == 0) {

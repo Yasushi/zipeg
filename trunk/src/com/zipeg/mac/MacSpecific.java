@@ -1,8 +1,12 @@
 package com.zipeg.mac;
 
 import com.zipeg.Zipeg;
+import com.zipeg.Util;
 
 import java.io.*;
+import java.lang.reflect.Method;
+import java.net.URLClassLoader;
+import java.net.URL;
 
 public final class MacSpecific {
 
@@ -51,6 +55,7 @@ public final class MacSpecific {
                                                     //    same volume and renamed "Rescued Items from <diskname>".
     kTemporaryFolderType          = fourCC("temp")  // temporary files go here (deleted periodically), but don't rely on it.)
     ;
+    private static Object sharedWorkspace; // com.apple.cocoa.application.NSWorkspace.sharedWorkspace
 
     public static void initMacOSXInterface() {
         com.apple.eawt.Application.getApplication().setEnabledPreferencesMenu(true);
@@ -91,6 +96,25 @@ public final class MacSpecific {
 
             }
         );
+
+        try {
+            Util.class.getClassLoader().loadClass("com.apple.cocoa.application.NSWorkspace");
+            sharedWorkspace = Util.callStatic("com.apple.cocoa.application.NSWorkspace.sharedWorkspace", Util.NONE);
+        } catch (Throwable t) {
+            try {
+                if (new File("/System/Library/Java/com/apple/cocoa/application/NSWorkspace.class").exists()) {
+                    ClassLoader classLoader = new URLClassLoader(new URL[]{new File("/System/Library/Java").toURL()});
+                    Class c = classLoader.loadClass("com.apple.cocoa.application.NSWorkspace");
+                    // do not use Util.getDeclaredMethod because of custom classloader
+                    Method m = c.getMethod("sharedWorkspace", Util.VOID);
+                    sharedWorkspace = m.invoke(null, Util.NONE);
+//                  Debug.traceln("sharedWorkspace=" + sharedWorkspace);
+                }
+            } catch (Throwable ignore) {
+                /* ignore */
+            }
+        }
+
     }
 
     // There is no known way to disable Quit menu item on Mac OS X
@@ -127,5 +151,18 @@ public final class MacSpecific {
         return (int)cc4;
     }
 
+    public static String getCocoaApplicationForFile(String file) {
+        assert Util.isMac();
+        try {
+            if (sharedWorkspace != null) {
+                // do not use Util.getDeclaredMethod because of custom classloader
+                Method applicationForFile = sharedWorkspace.getClass().getMethod("applicationForFile", Util.STRING);
+                return (String)Util.call(applicationForFile, sharedWorkspace, new Object[]{file});
+            }
+        } catch (Throwable t) {
+            /* ignore */
+        }
+        return null;
+    }
 }
 

@@ -43,17 +43,22 @@ public class CacheController {
             Runnable extracted = new Runnable() {
                 public void run() {
                     assert !IdlingEventQueue.isDispatchThread();
-                    if (Zipeg.getArchive() != null && ce.temp.canRead() && isSupportedImageType(file)) {
-                        extractThumbnail(ce);
-                    }
-                    if (Zipeg.getArchive() != null) {
-                        EventQueue.invokeLater(new Runnable(){
-                            public void run() {
-                                assert IdlingEventQueue.isDispatchThread();
-                                done.run();
-//                              Debug.traceln("extracted " + ce.temp);
+                    try {
+                        if (Zipeg.getArchive() != null && ce.temp != null) {
+                            assert file != null;
+                            if (ce.temp.canRead() && isSupportedImageType(file)) {
+                                extractThumbnail(ce);
                             }
-                        });
+                            EventQueue.invokeLater(new Runnable(){
+                                public void run() {
+                                    assert IdlingEventQueue.isDispatchThread();
+                                    done.run();
+//                                  Debug.traceln("extracted " + ce.temp);
+                                }
+                            });
+                        }
+                    } catch (Throwable ignore) {
+                        // ignore
                     }
                 }
             };
@@ -100,10 +105,8 @@ public class CacheController {
                     ImageIO.write(ce.image, type, ce.thumb);
                 }
             }
-        } catch (IOException iox) {
-            x = iox;
-        } catch (IllegalArgumentException iax) {
-            x = iax;
+        } catch (Throwable t) {
+            x = t;
         } finally {
             if (channel != null) {
                 try { channel.close();  } catch (IOException iox) { /* ignore */ }
@@ -128,7 +131,7 @@ public class CacheController {
     private static File makeThumbFile(File tmp) {
         File dir = new File(tmp.getParent() + ".t");
         dir.mkdirs();
-        return new File(dir, tmp.getName()); 
+        return new File(dir, tmp.getName());
     }
 
     private static String getExtension(File file) {

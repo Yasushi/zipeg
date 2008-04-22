@@ -8,12 +8,13 @@ import java.awt.datatransfer.*;
 import java.awt.dnd.*;
 import java.util.*;
 import java.util.List;
-import java.util.prefs.BackingStoreException;
 import java.io.*;
 import java.lang.reflect.*;
 import java.nio.channels.FileChannel;
 import java.nio.ByteBuffer;
 import java.beans.*;
+import javax.swing.filechooser.FileFilter;
+
 
 public final class Zipeg implements Runnable {
 
@@ -25,6 +26,20 @@ public final class Zipeg implements Runnable {
     private static Iterator testArchives;
     private static boolean test;
     private static final ArrayList recent = new ArrayList();
+
+    private static FileFilter archives = new FileFilter(){
+            public boolean accept(File f) {
+                try {
+                    return f.isDirectory() || Util.isArchiveFileType(f.getName());
+                } catch (Throwable t) { // InterruptedException
+                    return false;
+                }
+            }
+            public String getDescription() {
+                return "Archives (.zip .rar .arj .lha .7z .iso .jar ...)";
+            }
+        };
+
 
     private Zipeg() {
     }
@@ -38,25 +53,23 @@ public final class Zipeg implements Runnable {
         args = new ArrayList(Arrays.asList(a));
         if (args.contains("--clean")) {
             // reset preferences to initial state
-            try {
-                Presets.clear();
-                return;
-            } catch (BackingStoreException e) {
-                throw new Error(e);
-            }
+            Presets.clear();
+            return;
         }
+        parseOptions();
+        Debug.init(options.contains("debug") || options.contains("g"));
         // add start directory to java.library.path
         String pwd = System.getProperty("user.dir");
         String lp = System.getProperty("java.library.path");
         lp = lp == null || lp.length() == 0 ? pwd : lp + File.pathSeparator + pwd;
         System.setProperty("java.library.path", lp);
 
-        parseOptions();
-        Debug.init(options.contains("debug") || options.contains("g"));
         if (options.contains("uninstall-cleanup")) {
+//          JOptionPane.showMessageDialog(null, "uninstall-cleanup");
             FileAssociations fa = new FileAssociations();
             if (fa.isAvailable()) {
                 fa.setHandled(0);
+//              JOptionPane.showMessageDialog(null, "setHandled(0)");
                 System.exit(0);
             }
         }
@@ -88,7 +101,6 @@ public final class Zipeg implements Runnable {
             // ignore.printStackTrace();
         }
         try {
-//          long time = System.currentTimeMillis();
             if (file == null) {
                 file = File.createTempFile("test", "tmp");
             }
@@ -100,8 +112,6 @@ public final class Zipeg implements Runnable {
             out.close();
             os.close();
             file.delete();
-//          time = System.currentTimeMillis() - time;
-//          Debug.traceln("checkDiskSpace(" + REQUIRED / Util.MB + "MB) " + time + " milliseconds");
             return true;
         } catch (IOException iox) {
             if (file != null) {
@@ -121,10 +131,15 @@ public final class Zipeg implements Runnable {
         CrashLog.report("test", "./test-crash.txt");
 */
         if (options.contains("report-crash") && args.size() >= 2) {
-            CrashLog.report((String)args.get(0), (String)args.get(1));
+            try {
+                CrashLog.report((String)args.get(0), (String)args.get(1));
+                Presets.putLong("nextUpdate", System.currentTimeMillis() - 1); // check for update on next run
+                Presets.sync();
+            } catch (Throwable x) {
+                // ignore
+            }
             System.exit(153);
         }
-        Z7.loadLibrary();
         if (Util.isWindows()) {
             Registry.getInstance();
         } else if (Util.isMac() && Util.getOsVersion() >= 10.4) {
@@ -164,9 +179,6 @@ public final class Zipeg implements Runnable {
                     JOptionPane.ERROR_MESSAGE);
             return;
         }
-        if (Util.isMac()) {
-            checkRunningFromDmg();
-        }
         Actions.addListener(this);
         final MainFrame frame = new MainFrame();
         assert !frame.isVisible();
@@ -180,16 +192,21 @@ public final class Zipeg implements Runnable {
             if (!Util.isWindows()) {
                 // on Win32 license is accpeted at the installer
                 License.showLicence(true);
+                firstRun = true;
             }
             Presets.putBoolean("licenseAccpeted", true);
+            Presets.sync();
         }
         loadRecent();
         if (firstRun) {
+            // first update in few days from installtion date
+            Presets.putLong("nextUpdate", System.currentTimeMillis() + Updater.DAYS);
             // Only once create installation guid
             if (Presets.get("zipeg.uuid", null) == null) {
                 Presets.put("zipeg.uuid", Util.uuid());
+                Presets.sync();
             }
-            Util.sleep(2 * 1000);
+//          Util.sleep(2 * 1000);
 //          JOptionPane.showMessageDialog(null, "first run", "Zipeg Setup", JOptionPane.INFORMATION_MESSAGE);
         }
         Updater.cleanUpdateFiles();
@@ -223,6 +240,7 @@ public final class Zipeg implements Runnable {
                     List files = (List)t.getTransferData(DataFlavor.javaFileListFlavor);
                     if (files.size() == 1) {
                         File file = (File)files.get(0);
+                        // TODO: (Leo) do we need to test for supported file types?
                         if (Util.isArchiveFileType(Util.getCanonicalPath(file))) {
                             open(file);
                         }
@@ -272,57 +290,6 @@ public final class Zipeg implements Runnable {
 
     public static String getRecent(int ix) {
         return ix < recent.size() ? (String)recent.get(ix) : null;
-    }
-
-    private void checkRunningFromDmg() {
-        String cd = Util.getCanonicalPath(new File(".")).toLowerCase();
-        boolean mounted = cd.startsWith("/volumes/zipeg/zipeg");
-        boolean desktop = cd.startsWith("/users/") && cd.indexOf("/desktop/") > 0;
-        if (mounted || desktop) {
-            File temp = null;
-            Image install = null;
-            FileOutputStream fos = null;
-            try {
-                install = Resources.getImage("mac.install");
-                temp = File.createTempFile("zipeg-install", ".png");
-                temp.delete();
-                fos = new FileOutputStream(temp);
-                fos.write(Resources.getBytes("mac.install"));
-                fos.close();
-                fos = null;
-            } catch (IOException e) {
-                if (temp != null) { temp.delete(); }
-                temp = null;
-            } finally {
-                Util.close(fos);
-            }
-            int w = install == null ? 0 : install.getWidth(null);
-            int h = install == null ? 0 : install.getHeight(null);
-            assert temp == null || temp.canRead();
-            String user = System.getProperty("user.name");
-            JOptionPane.showMessageDialog(MainFrame.getTopFrame(),
-                "<html><body>" +
-                "<p>Zipeg cannot run from mounted DMG file or from Desktop.<br>" +
-                "Please do following steps:<br>" +
-                "Close this message box.<br>" +
-                "Drag <b>Zipeg.app</b> into the /<b>Applications</b> folder.<br>" +
-                "Eject Zipeg volume.<br>" +
-                "Start <b>Zipeg</b> from /<b>Applications</b>.</p>" +
-                (temp != null ?
-                "<img src=\"file:" + Util.getCanonicalPath(temp) +"\" width=" + w + " height=" + h + "><br>" :
-                "") +
-                "<i>If your are not allowed to modify root </i><b>/Applications</b><i> folder<br>" +
-                "create local </i><b>/Users/" + user + "/Applications/</b><i> folder and drag<br>" +
-                "Zipeg there.</i></p>" +
-                "</body></html>",
-                "Zipeg Prompt: Running from DMG file",
-                JOptionPane.ERROR_MESSAGE);
-            if (temp != null) {
-                temp.delete();
-                temp.deleteOnExit(); // html pane holds it locked...
-            }
-            System.exit(-1);
-        }
     }
 
     private static void parseOptions() {
@@ -403,6 +370,7 @@ public final class Zipeg implements Runnable {
                     (!Presets.getBoolean("zipOnlyOK", false))) {
                     fa.askHandleAll();
                     Presets.putBoolean("zipOnlyOK", true);
+                    Presets.sync();
                 }
             }
         }
@@ -484,8 +452,7 @@ public final class Zipeg implements Runnable {
 
     public static void updateAvailable(Object param) {
         Object[] p = (Object[])param;
-        updateAvailable((Integer)p[0], (Long)p[1],
-                (String)p[2], (String)p[3], (String)p[4]);
+        updateAvailable((Integer)p[0], (String)p[1], (String)p[2], (String)p[3], (Boolean)p[4]);
     }
 
     private static int updating;
@@ -493,20 +460,20 @@ public final class Zipeg implements Runnable {
     /**
      * updateAvailable event handler is invoked from Updater.checkForUpdate
      * @param rev  revision
-     * @param nextUpdate nextUpdate time when the query was issued
      * @param ver version
      * @param url URL of file to download
      * @param msg message
+     * @param now update was requested by UI?
      */
-    public static void updateAvailable(Integer rev, Long nextUpdate,
-            String ver, String url, String msg) {
+    public static void updateAvailable(Integer rev,
+            String ver, String url, String msg, Boolean now) {
         assert IdlingEventQueue.isDispatchThread();
         if (updating > 0) {
             return;
         }
         updating++;
         if (rev.intValue() <= Util.getRevision()) {
-            if (nextUpdate.longValue() == 1) {
+            if (now.booleanValue()) {
                 JOptionPane.showMessageDialog(MainFrame.getTopFrame(),
                         "<html><body>Your version of Zipeg is up to date." +
                         "</body></html>", "Zipeg: Check for Updates",
@@ -536,6 +503,7 @@ public final class Zipeg implements Runnable {
             try {
                 Runtime.getRuntime().exec(Util.getCanonicalPath(file));
             } catch (IOException e) {
+                redownload();
                 throw new Error(e);
             }
             System.exit(0);
@@ -645,28 +613,13 @@ public final class Zipeg implements Runnable {
             }
             System.setProperty("apple.awt.fileDialogForDirectories", "false");
         } else {
-            javax.swing.filechooser.FileFilter archives = new javax.swing.filechooser.FileFilter(){
-                public boolean accept(File f) {
-                    try {
-                        return f.isDirectory() || Util.isArchiveFileType(f.getName());
-                    } catch (Throwable t) { // InterruptedException
-                        return false;
-                    }
-                }
-                public String getDescription() {
-                    return "Archives (.zip .rar .arj .lha .7z .iso .jar ...)";
-                }
-            };
-            JFileChooser fc = FileChooser.getInstance();
-            if (Util.isMac()) {
-                FilteredFileSystemView ffsv = new FilteredFileSystemView(fc, fc.getFileSystemView());
-                fc.setFileSystemView(ffsv);
-            } else if (Util.isWindows()) {
-                // workaround for: http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6372808
-                FilteredFileSystemView ffsv = new FilteredFileSystemView(fc, fc.getFileSystemView());
-                fc.setFileSystemView(ffsv);
-            }
-            fc.setCurrentDirectory(new File(dir));
+            FileChooser fc = FileChooser.getInstance();
+            // for Mac - FilteredFileSystemView is necessary because of hidden files.
+            // for Windows - as a workaround workaround for:
+            // http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6372808
+            fc.setFileSystemView(fc.getFilteredFileSystemView());
+            File cd = new File(dir);
+            fc.setCurrentDirectory(cd.isDirectory() ? cd : Util.getDesktop());
             fc.setFileHidingEnabled(true);
             fc.setDialogTitle("Zipeg: Open Archive");
             fc.setFileSelectionMode(JFileChooser.FILES_ONLY);
@@ -684,6 +637,7 @@ public final class Zipeg implements Runnable {
         }
         if (dir != null) {
             Presets.put("fileOpenFolder", dir);
+            Presets.sync();
         }
     }
 
@@ -698,7 +652,9 @@ public final class Zipeg implements Runnable {
             if (list == null || Flags.getFlag(Flags.EXTRACT_WHOLE)) {
                 list = null;
             } else if (!Flags.getFlag(Flags.EXTRACT_SELECTED)) {
-                assert Flags.getFlag(Flags.EXTRACT_ASK);
+                // the assert below fires if registry does not work properly.
+                // TODO: investigate. For now commented out.
+                // assert Flags.getFlag(Flags.EXTRACT_ASK);
                 int i = askSelected(list);
                 if (i < 0) {
                     return;
@@ -709,6 +665,29 @@ public final class Zipeg implements Runnable {
             extractList(list, Flags.getFlag(Flags.CLOSE_AFTER_EXTRACT));
         }
     }
+
+    private static boolean equalsOrExtends(String dest, String zipname) {
+        if (dest.equals(zipname)) {
+            return true;
+        }
+        if (!dest.startsWith(zipname)) {
+            return false;
+        }
+        String s = dest.substring(zipname.length());
+        if (s.length() >= 2) {
+            if (s.charAt(0) != '.') {
+                return false;
+            }
+            for (int i = 1; i < s.length(); i++) {
+                if (!Character.isDigit(s.charAt(i))) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return false;
+    }
+
 
     public static void extractList(List list, boolean quit) {
         String destination = MainFrame.getInstance().getDestination();
@@ -725,10 +704,11 @@ public final class Zipeg implements Runnable {
             String onlychild = root.getChildrenCount() == 1 ?
                     ((TreeElement)root.getChildren().next()).getName() : null;
             // do not append twice
+            File d = new File(destination);
             if (zipname.equals(onlychild)) {
-                dst = new File(destination);
-            } else if (destination.endsWith(File.separator + zipname)) {
-                dst = new File(destination);
+                dst = d;
+            } else if (equalsOrExtends(d.getName(), zipname)) {
+                dst = d;
             } else {
                 dst = new File(destination, zipname);
                 if (dst.exists() && !dst.isDirectory()) {
@@ -806,6 +786,7 @@ public final class Zipeg implements Runnable {
             Flags.addFlag(all.isSelected() ? Flags.EXTRACT_WHOLE : Flags.EXTRACT_SELECTED);
         }
         Presets.putBoolean("extractPreferSelected", sel.isSelected());
+        Presets.sync();
         if (i == JOptionPane.CANCEL_OPTION) {
             return -1;
         }
@@ -868,7 +849,10 @@ public final class Zipeg implements Runnable {
                 TreeElement c = getSingleDescendant(r);
                 Debug.traceln("single descendant " + c);
                 boolean composite = Util.isCompositeArchive(archive.getName());
-                if (c != null && (composite || Util.isArchiveFileType(c.getFile()))) {
+                // do not open .jar inside .zip
+                boolean a = c != null && Util.isArchiveFileType(c.getFile()) &&
+                        !c.getFile().toLowerCase().endsWith(".jar");
+                if (c != null && (composite || a)) {
                     Debug.traceln("extract and open " + c);
                     archive.extractAndOpen(c);
                 }
@@ -889,7 +873,7 @@ public final class Zipeg implements Runnable {
         }
         return null;
     }
-        
+
     private static void commandFileClose(boolean exiting) {
         assert IdlingEventQueue.isDispatchThread();
         if (Util.isMac()) {
@@ -946,16 +930,19 @@ public final class Zipeg implements Runnable {
     private static void showMainFrame() {
         if (MainFrame.getInstance() != null) {
             MainFrame.getInstance().setVisible(true);
+            MainFrame.getInstance().repaint(); // dirty fix fof StatusBar first paint problem
         }
     }
 
     private static void open(File file) {
+        // TODO: need a warning dialog here and cancel on the action in progress
         showMainFrame();
         if (MainFrame.getInstance().inProgress()) {
             return;
         }
         int count = Presets.getInt("extract.count", 0);
         Presets.putInt("extract.count", count + 1);
+        Presets.sync();
         ArchiveProcessor.open(file);
     }
 
@@ -963,6 +950,7 @@ public final class Zipeg implements Runnable {
         for (int i = 0; i < recent.size(); i++) {
             String name = (String)recent.get(i);
             Presets.put("recent.archive." + i, name);
+            Presets.sync();
         }
     }
 
@@ -980,6 +968,9 @@ public final class Zipeg implements Runnable {
     }
 
     private void workaroundMenuDropShadowBorder() {
+        if (Util.getJavaVersion() < 1.4212) {
+            return; // pre 1.4.2.3 has shadows broken
+        }
         Border defaultBorder = UIManager.getBorder("PopupMenu.border");
         UIManager.put("PopupMenu.border", BorderFactory.createCompoundBorder(
                 new DropShadowBorder(Color.WHITE, 0, false),
@@ -1062,14 +1053,10 @@ public final class Zipeg implements Runnable {
             }
             // http://developer.apple.com/releasenotes/Java/java141/system_properties/chapter_4_section_3.html
             if (Util.isMac()) {
+                System.setProperty("com.apple.mrj.application.apple.menu.about.name", name);
                 if (metal) {
-                    System.setProperty("apple.awt.showGrowBox", "true");
                     System.setProperty("com.apple.mrj.application.growbox.intrudes", "true");
-                    if (Util.getJavaVersion() < 1.6) {
-                        // GrowBox painting is broken in Java prio to 1.6 on Mac
-                        // It took Apple few years to paint growbox correctly... :-(
-                        System.setProperty("apple.awt.showGrowBox", "false");
-                    }
+                    System.setProperty("apple.awt.showGrowBox", "false");
                     System.setProperty("apple.awt.brushMetalLook", "true");
                     System.setProperty("apple.awt.brushMetalRounded", "true");
                 }
@@ -1078,7 +1065,8 @@ public final class Zipeg implements Runnable {
                 System.setProperty("apple.awt.textantialiasing","true");
                 System.setProperty("com.apple.mrj.application.live-resize", "true");
                 System.setProperty("com.apple.macos.smallTabs","false");
-                System.setProperty("com.apple.mrj.application.apple.menu.about.name", name);
+            } else {
+                System.setProperty("swing.aatext", "false");
             }
             Toolkit.getDefaultToolkit().setDynamicLayout(true);
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
@@ -1091,5 +1079,81 @@ public final class Zipeg implements Runnable {
     }
 
 
+    static void redownload() {
+        JOptionPane.showMessageDialog(MainFrame.getTopFrame(),
+                "This installation of Zipeg is corrupted\n" +
+                "Please download and reinstall Zipeg\n" +
+                "from http://www.zipeg.com\n" +
+                "Application will quit now.",
+                "Zipeg: Fatal Error", JOptionPane.ERROR_MESSAGE);
+        Util.openUrl("http://www.zipeg.com");
+        System.exit(1);
+    }
 }
 
+/*
+
+Java 1.6 extra properties (new and experimental):
+Property  	Default  	Description
+apple.awt.brushMetalLook
+apple.awt.draggableWindowBackground 	false
+apple.awt.windowShadow 	                true
+apple.awt.windowShadow.revalidateNow
+apple.awt.documentModalSheet 	false
+apple.awt.delayWindowOrdering
+apple.awt.windowAlpha 	1.0 	Float
+apple.awt.smallTitleBar 	false
+
+<key>VMOptions</key>
+<array>
+    <string>-XX:+MaxFDLimit</string>
+    <string>-Xnoclassgc</string>
+    <string>-XX:+AggressiveOpts</string> // does not do much on 1.5/1.6
+    warning: -X:incgc is broken in 1.6
+</array>
+
+*/
+
+
+/*
+Database stuff for the future
+
+    public static String string2md5HMA(String keyString, String message)  {
+
+	Provider sunJce = new com.sun.crypto.provider.SunJCE();
+        Security.insertProviderAt(sunJce,0);
+        SecretKey key = new SecretKeySpec(keyString.getBytes(), "HmacMD5");
+        try {
+		Mac mac = Mac.getInstance("HmacMD5");
+		mac.init(key);
+		return toHEX(mac.doFinal(message.getBytes()));
+        } catch (Exception e) {
+		throw new RuntimeException("Failed to create signature", e);
+
+        }
+    }
+
+    private static String toHEX(byte[] digest) {
+        StringBuffer hexString = new StringBuffer();
+        for (int i = 0; i < digest.length; ++i) {
+		String hx = Integer.toHexString(0xFF & digest[i]);
+		if (hx.length() == 1) {
+			hx = "0" + hx;
+		}
+		hexString.append(hx);
+        }
+        return hexString.toString();
+    }
+
+
+    private void test() {
+        System.out.println(string2md5HMA("Jefe", "what do ya want for nothing?"));
+        System.out.println(string2md5HMA("foo", "bar"));
+        System.out.println(string2md5HMA("bar", "foo"));
+        long seconds = System.currentTimeMillis() / 1000;
+        System.out.println("Unix time()=" + seconds);
+        System.out.println("Unix time()=" + seconds / (48 * 3600) + " double days");
+        System.out.println();
+    }
+
+*/

@@ -3,27 +3,13 @@ package com.zipeg;
 import javax.swing.*;
 import javax.swing.event.*;
 import java.awt.*;
-import java.awt.image.BufferedImage;
 import java.awt.event.*;
 import java.nio.charset.Charset;
 import java.util.*;
 
 public final class Settings extends JTabbedPane {
 
-    private static Image[] macOpenWith;
     private boolean canceled;
-
-    private Image getMacOpenWith(int ix) {
-        if (macOpenWith == null) {
-            macOpenWith = new Image[]{
-                    Resources.getImage("mac.openwith-1"),
-                    Resources.getImage("mac.openwith-2"),
-                    Resources.getImage("mac.openwith-3"),
-                    Resources.getImage("mac.openwith-4")
-            };
-        }
-        return macOpenWith[ix];
-    }
 
     private Settings() {
         BasePanel general = new General();
@@ -46,6 +32,7 @@ public final class Settings extends JTabbedPane {
                 int i = getSelectedIndex();
                 if (0 <= i && i <= 2) {
                     Presets.putInt("Settings.tab", i);
+                    Presets.sync();
                 }
             }
         });
@@ -53,7 +40,6 @@ public final class Settings extends JTabbedPane {
 
     public static void showPreferences() {
         long oldFlags = Flags.getFlags();
-        boolean modalSheet = Util.isMac() && Util.getJavaVersion() >= 1.6;
         JDialog dlg = Util.createDocumentModalDialog(MainFrame.getTopFrame());
         Settings s = new Settings();
         dlg.setTitle(Util.isMac() ? "Zipeg Preferences" : "Zipeg Options");
@@ -62,9 +48,6 @@ public final class Settings extends JTabbedPane {
         dlg.getContentPane().add(s.createButtons(dlg), BorderLayout.SOUTH);
         dlg.pack();
         dlg.setResizable(false);
-        if (!modalSheet) {
-            dlg.setLocationRelativeTo(dlg.getParent());
-        }
         dlg.setVisible(true); // nested dispatch loop
         if (!s.canceled) {
             for (int i = 0; i < s.getTabCount(); i++) {
@@ -76,6 +59,7 @@ public final class Settings extends JTabbedPane {
                                   new Object[]{new Long(oldFlags),
                                                new Long(Flags.getFlags())});
             }
+            Presets.sync();
         }
         dlg.dispose();
     }
@@ -252,11 +236,6 @@ public final class Settings extends JTabbedPane {
 
     private final class FileSettings extends BasePanel {
 
-        private float transparency = 0f;
-        private Image image = new BufferedImage(1, 1, BufferedImage.TYPE_4BYTE_ABGR);
-        private long time;
-        private int ix;
-        private int delay = 8 * 1000;
         private JLabel label = new JLabel();
         private FileAssociations fa = new FileAssociations();
 
@@ -267,10 +246,9 @@ public final class Settings extends JTabbedPane {
                 add(fa, BorderLayout.CENTER);
             } else {
                 label.setText("<html><br>On Mac OS X prio 10.4 use <b>Finder</b> " +
-                        "to associate Zipeg with archives:</html>");
+                        "to associate Zipeg with archives.</html>");
                 setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
                 add(label);
-                time = System.currentTimeMillis() + delay;
             }
         }
 
@@ -282,43 +260,6 @@ public final class Settings extends JTabbedPane {
             if (fa != null && fa.isAvailable() && fa.getHandled() != fa.getSelected()) {
                 fa.setHandled(fa.getSelected());
             }
-        }
-
-        public void paint(Graphics g) {
-            super.paint(g);
-            if (!fa.isAvailable()) {
-                Graphics2D g2d = (Graphics2D)g;
-                Composite c = g2d.getComposite();
-                g2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1.0f - Math.abs(transparency)));
-                int x = (getWidth() - image.getWidth(null)) / 2;
-                int y = (getHeight() - image.getHeight(null)) - 5;
-                g2d.drawImage(image, x, y, null);
-                g2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.abs(transparency)));
-                x = (getWidth() - getMacOpenWith(ix).getWidth(null)) / 2;
-                y = (getHeight() - getMacOpenWith(ix).getHeight(null)) - 5;
-                g2d.drawImage(getMacOpenWith(ix), x, y, null);
-                g2d.setComposite(c);
-                Util.invokeLater(100, new Runnable(){
-                    public void run() {
-                        transparency = Math.max(0, Math.min(1.0f, transparency + 0.05f));
-                        if (transparency == 1.0f) {
-                            if (System.currentTimeMillis() > time) {
-                                next();
-                            }
-                        }
-                        repaint();
-                    }
-                });
-            }
-        }
-
-        private void next() {
-            image = getMacOpenWith(ix);
-            ix = (ix + 1) % 4;
-            transparency = 0;
-            time = System.currentTimeMillis() + delay;
-            delay = Math.min(15 * 1000, delay + 1000);
-            revalidate();
         }
 
     }

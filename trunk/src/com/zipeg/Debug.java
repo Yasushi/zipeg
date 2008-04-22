@@ -12,6 +12,7 @@ public final class Debug {
     private static final int RESERVED = Util.MB;
     private static byte[] reserve = new byte[RESERVED];
     private static final Set exclude = new HashSet() {{
+        add("user.name");
         add("java.runtime.name");
         add("swing.handleTopLevelPaint");
         add("sun.awt.exception.handler");
@@ -90,10 +91,6 @@ public final class Debug {
             } else {
                 x.printStackTrace();
             }
-            if (Util.getCacheDirectory().toString().indexOf("com.zipeg") > 0) {
-                Util.rmdirs(Util.getCacheDirectory());
-            }
-            System.exit(1);
         }
     }
 
@@ -118,6 +115,12 @@ public final class Debug {
         }
 
         public static void report(Throwable x) {
+            if (Util.isMac()) {
+                String cd = System.getProperty("user.dir");
+                if (cd.toLowerCase().indexOf(".dmg/") >= 0) {
+                    System.exit(0);
+                }
+            }
             Throwable cause = x;
             for (; ;) {
                 if (cause instanceof InvocationTargetException &&
@@ -140,11 +143,13 @@ public final class Debug {
                 };
                 Archive a = Zipeg.getArchive();
                 if (a != null) {
-                    pw.println("Archive: \"" + a.getName() + "\"\n");
+                    String name = new File(a.getName()).getName();
+                    pw.println("Archive: \"" + name + "\"\n");
                 }
                 String archive = Zipeg.getRecent(0) != null ? Zipeg.getRecent(0) : "";
                 if (!"".equals(archive)) {
-                    pw.println("Last Archive: \"" + archive + "\"\n");
+                    String name = new File(archive).getName();
+                    pw.println("Last Archive: \"" + name + "\"\n");
                 }
                 method = printStackTrace(cause, pw);
             } finally {
@@ -161,7 +166,10 @@ public final class Debug {
                     sb.append(key).append("=").append(p.get(key)).append("\n");
                 }
             }
+            String sep = File.separatorChar == '\\' ? "\\\\" : "/";
+            String user = sep + p.get("user.name");
             String body = sb.toString();
+            body = body.replaceAll(user, sep + "user");
             String subject = "[zipeg crash] " + Util.getVersion() + " " + shorten(cause.toString()) +
                              (method != null ? " at " + shorten(method) : "");
             if (isIgnorable(cause, body)) {
@@ -180,7 +188,7 @@ public final class Debug {
          * @param subject of email to send
          * @param body of email with crash log
          */
-        public static void report(String subject, String body) {
+        private static void report(String subject, String body) {
             try {
                 File file = new File(Util.getTmp(), "zipeg.crash." + System.currentTimeMillis() + ".log");
                 String path = Util.getCanonicalPath(file);
@@ -197,12 +205,10 @@ public final class Debug {
                 a[4] = "--report-crash";
                 a[5] = subject;
                 a[6] = path;
+                Process p = Runtime.getRuntime().exec(a);
                 if (isDebug()) {
-                    Process p = Runtime.getRuntime().exec(a);
                     p.waitFor();
                     Debug.trace("exit = " + p.exitValue());
-                } else {
-                    Runtime.getRuntime().exec(a);
                 }
             } catch (Throwable x) {
                 x.printStackTrace();
@@ -273,56 +279,70 @@ public final class Debug {
          * https://www.limewire.org/jira/browse/GUI-235
          */
         private static boolean isIgnorable(Throwable x, String msg) {
-            if (msg.indexOf("RepaintManager") != -1)
+            if (msg.indexOf("RepaintManager") >= 0) {
                 return true;
-            if (msg.indexOf("sun.awt.RepaintArea.paint") != -1)
+            }
+            if (msg.indexOf("sun.awt.RepaintArea.paint") >= 0) {
                 return true;
+            }
+            // http://groups.google.com.pk/group/Google-Web-Toolkit/browse_thread/thread/44df53c5c7ef6df2/2b68528d3fb70048?lnk=raot
+            if (msg.indexOf("apple.awt.CGraphicsEnvironment.displayChanged") >= 0) {
+                return true;
+            }
+            // http://lists.apple.com/archives/java-dev/2004/May/msg00192.html
+            // http://www.thinkingrock.com.au/forum/viewtopic.php?p=4279&sid=0abfa9f43f7a52d33e3960f575973c5c
+            // http://www.jetbrains.net/jira/browse/IDEADEV-8692
+            // http://www.jetbrains.net/jira/browse/IDEADEV-9931
+            // http://groups.google.com/group/comp.soft-sys.matlab/browse_thread/thread/5c56f6d6d08cb5e0/db152a7adc8b8e25?lnk=raot
             // display manager on OSX goes out of whack
+            if (msg.indexOf("apple.awt.CWindow.displayChanged") >= 0) {
+                return true;
+            }
             if (x instanceof ArrayIndexOutOfBoundsException) {
-                if (msg.indexOf("apple.awt.CWindow.displayChanged") != -1)
-                    return true;
-                if (msg.indexOf("plaf.basic.BasicTabbedPaneUI.getTabBounds") != -1)
+                if (msg.indexOf("plaf.basic.BasicTabbedPaneUI.getTabBounds") >= 0)
                     return true;
             }
             if (x instanceof IndexOutOfBoundsException) {
-                if (msg.indexOf("DefaultRowSorter.convertRowIndexToModel") != -1) {
+                if (msg.indexOf("DefaultRowSorter.convertRowIndexToModel") >= 0) {
                     return true;
                 }
             }
             // system clipboard can be held, preventing us from getting.
             // throws a RuntimeException through stuff we don't control...
             if (x instanceof IllegalStateException) {
-                if (msg.indexOf("cannot open system clipboard") != -1)
+                if (msg.indexOf("cannot open system clipboard") >= 0)
                     return true;
             }
             if (x instanceof IllegalComponentStateException) {
-                if (msg.indexOf("component must be showing on the screen to determine its location") != -1)
+                if (msg.indexOf("component must be showing on the screen to determine its location") >= 0)
                     return true;
             }
             if (x instanceof NullPointerException) {
-                if (msg.indexOf("MetalFileChooserUI") != -1)
-                    return true;
-                if (msg.indexOf("WindowsFileChooserUI") != -1)
-                    return true;
-                if (msg.indexOf("AquaDirectoryModel") != -1)
-                    return true;
-                if (msg.indexOf("SizeRequirements.calculateAlignedPositions") != -1)
-                    return true;
-                if (msg.indexOf("BasicTextUI.damageRange") != -1)
-                    return true;
-                if (msg.indexOf("null pData") != -1)
-                    return true;
-                if (msg.indexOf("disposed component") != -1)
-                    return true;
-                if (msg.indexOf("FilePane$2.repaintListSelection") != -1) {
+                if (msg.indexOf("MetalFileChooserUI") >= 0 ||
+                    msg.indexOf("WindowsFileChooserUI") >= 0 ||
+                    msg.indexOf("AquaDirectoryModel") >= 0 ||
+                    msg.indexOf("SizeRequirements.calculateAlignedPositions") >= 0 ||
+                    msg.indexOf("BasicTextUI.damageRange") >= 0 ||
+                    msg.indexOf("null pData") >= 0 ||
+                    msg.indexOf("disposed component") >= 0 ||
+                    msg.indexOf("FilePane$2.repaintListSelection") >= 0) {
                     return true;
                 }
             }
+            if (msg.indexOf("InternalError: Unable to bind") >= 0) {
+                return true;
+            }
+            if (msg.indexOf("sun.awt.shell.Win32ShellFolder2.getFileSystemPath0") >= 0) {
+                return true;
+            }
+            if (msg.indexOf("Could not get shell folder ID list") >= 0) {
+                return true;
+            }
             if (x instanceof InternalError) {
-                if (msg.indexOf("getGraphics not implemented for this component") != -1)
+                if (msg.indexOf("getGraphics not implemented for this component") >= 0)
                     return true;
             }
-            return false;
+            return msg.indexOf("ArrayIndexOutOfBoundsException: 3184") >= 0;
         }
 
     }

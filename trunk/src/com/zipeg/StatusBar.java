@@ -68,7 +68,7 @@ public final class StatusBar extends JToolBar {
 
     public Insets getInsets() {
         Insets i = super.getInsets();
-        if (Util.isMac()) {
+        if (Util.isMac() && Util.getJavaVersion() < 1.6 && Util.getOsVersion() < 10.5) {
             i.top += 1;
             i.bottom += 2;
         }
@@ -212,7 +212,11 @@ public final class StatusBar extends JToolBar {
             Graphics2D g2d = (Graphics2D)g;
             int x = 0;
             Image bulb = MainFrame.getInstance().inProgress() ? bulbR : bulbG;
-            g2d.drawImage(bulb, x, 0, null);
+            int Y = Util.isMac() ? 2 : 0;
+            if (Util.isMac() && Util.getJavaVersion() >= 1.6) {
+                Y += 3; // no insets
+            }
+            g2d.drawImage(bulb, x, Y, null);
             x += bulb.getWidth(null);
             Color s = g2d.getColor();
             if (Util.isWindows()) {
@@ -269,7 +273,7 @@ public final class StatusBar extends JToolBar {
             repaint();
             if (Flags.getFlag(Flags.PLAY_SOUNDS)) {
                 String r = isError(message) ? "resources/error.wav" : "resources/done.wav";
-                sound = new Sound(Resources.class.getResourceAsStream(r), false);
+                sound = new Sound(Resources.getResourceAsStream(r), false);
             }
         }
 

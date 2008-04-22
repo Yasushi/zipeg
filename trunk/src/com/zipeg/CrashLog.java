@@ -3,6 +3,7 @@ package com.zipeg;
 import java.util.*;
 import java.io.*;
 import javax.swing.*;
+import javax.swing.event.*;
 import java.awt.*;
 
 public final class CrashLog {
@@ -26,8 +27,73 @@ public final class CrashLog {
             String body = new String(bytes);
             send(message, body);
             file.delete();
+            boolean force =
+            // http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6449933
+                body.indexOf("OutOfBoundsException: 3184") >= 0;
+            updateJava(force);
+            Util.openUrl("http://www.zipeg.com/faq.crash.html");
         } catch (Throwable e) {
             e.printStackTrace();
+        }
+    }
+
+    public static void updateJava(boolean force) {
+        if (!force) {
+            double version = Util.getJavaVersion();
+            if (Util.isWindows() && version > 1.60029) {
+                return;
+            }
+            if (Util.isMac()) {
+                if (Util.getOsVersion() > 10.3 && version > 1.5012) {
+                    return;
+                }
+                if (Util.getOsVersion() < 10.4 && version > 1.42) {
+                    return;
+                }
+            }
+        }
+        JEditorPane info = new JEditorPane();
+        info.setContentType("text/html");
+        info.setEditable(false);
+        info.setOpaque(false);
+        Font font = new JLabel().getFont();
+        String url = "http://www.java.com/getjava";
+        if (Util.isMac()) {
+/*
+            if ("i386".equals(Util.getProcessor())) {
+                url = "http://www.apple.com/downloads/macosx/apple/macosx_updates/j2se50release4intel.html";
+            } else {
+                url = "http://www.apple.com/downloads/macosx/apple/macosx_updates/j2se50release4ppc.html";
+            }
+*/
+            url = "http://www.apple.com/support/downloads/javaformacosx104release6.html";
+            if (Util.getOsVersion() <= 10.4) {
+                url = "http://www.apple.com/downloads/macosx/apple/macosx_updates/javaformacosx104release6.html";
+            }
+            if (Util.getOsVersion() < 10.4) {
+                url = "http://www.apple.com/support/downloads/javaformacosx103update5.html";
+            }
+        }
+        info.setText(
+                "<html><body>" +
+                "<font face=\"" + font.getName() + "\">" +
+                "Your Java installation is not up to date.<br>" +
+                "Please consider updating to the latest version:<br>" +
+                "<a href=\"" + url + "\">Update Java Now</a>" +
+                "</font></body></html>");
+        final boolean[] clicked = new boolean[1];
+        info.addHyperlinkListener(new HyperlinkListener() {
+            public void hyperlinkUpdate(HyperlinkEvent e) {
+                if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
+                    Util.openUrl(e.getURL().toString());
+                    clicked[0] = true;
+                }
+            }
+        });
+        info.revalidate();
+        JOptionPane.showMessageDialog(null, info, "Update Java", JOptionPane.PLAIN_MESSAGE);
+        if (!clicked[0]) {
+            Util.openUrl(url);
         }
     }
 
@@ -130,7 +196,14 @@ public final class CrashLog {
         sp1.setAlignmentX(Component.LEFT_ALIGNMENT);
         panel.add(sp1);
 
-        JEditorPane pane = new JEditorPane();
+        JEditorPane pane = new JEditorPane()  {
+            public void addNotify() {
+                super.addNotify();
+                EventQueue.invokeLater(new Runnable(){
+                    public void run() { scrollRectToVisible(new Rectangle(0, 0, 1, 1)); }
+                });
+            }
+        };
         pane.setContentType("text/html");
         pane.setText("<html><body><pre>" + body + "</pre><body></html>");
         pane.setOpaque(false);
@@ -149,6 +222,9 @@ public final class CrashLog {
         panel.add(new JLabel("Crash log details:"));
         panel.add(Box.createVerticalStrut(5));
         panel.add(sp2);
+
+
+
 
         panel.add(Box.createVerticalStrut(10));
         Object[] options = new Object[]{"  Send  ", " Cancel "};

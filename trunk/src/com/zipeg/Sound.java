@@ -25,7 +25,7 @@ public class Sound implements LineListener, MetaEventListener {
             x = e;
         } catch (LineUnavailableException e) {
             x = e;
-        } catch (Exception e) {
+        } catch (Throwable e) {
             x = e;
         }
         if (x != null) {
@@ -60,7 +60,7 @@ public class Sound implements LineListener, MetaEventListener {
         if (!AudioSystem.isLineSupported(info)) {
             throw new UnsupportedAudioFileException("unsupported: " + info);
         }
-        clip = (Clip)AudioSystem.getLine(info);;
+        clip = (Clip)AudioSystem.getLine(info);
         AudioInputStream ain = srcFormat.getEncoding().equals(pcmEncoding) ? audioIn :
                 AudioSystem.getAudioInputStream(pcmEncoding, audioIn);
         try {
@@ -71,12 +71,21 @@ public class Sound implements LineListener, MetaEventListener {
             clip.removeLineListener(this);
             // noinspection UnusedAssignment
             clip = null;
+            Flags.removeFlag(Flags.PLAY_SOUNDS);
             throw e;
+        } catch (OutOfMemoryError e) {
+            // ignore
+            clip.removeLineListener(this);
+            // noinspection UnusedAssignment
+            clip = null;
+            Flags.removeFlag(Flags.PLAY_SOUNDS);
         }
     }
 
     public void update(LineEvent e) {
-        assert !IdlingEventQueue.isDispatchThread();
+        // uk.co.mandolane.oemamixer on Mac calls update from init on
+        // dispatch thread
+//      assert !IdlingEventQueue.isDispatchThread();
         if (LineEvent.Type.STOP.equals(e.getType())) {
             EventQueue.invokeLater(new Runnable(){
                 public void run() {
@@ -118,7 +127,7 @@ public class Sound implements LineListener, MetaEventListener {
     }
 
     public void meta(MetaMessage e) {
-        assert !IdlingEventQueue.isDispatchThread();
+//      assert !IdlingEventQueue.isDispatchThread();
         if (e.getType() == 47) { // Sequencer is done playing
             EventQueue.invokeLater(new Runnable(){
                 public void run() { closeSequencer(); }
@@ -127,7 +136,7 @@ public class Sound implements LineListener, MetaEventListener {
     }
 
     private void closeSequencer() {
-        assert IdlingEventQueue.isDispatchThread();
+//      assert IdlingEventQueue.isDispatchThread();
         if (sequencer != null) {
             sequencer.stop();
             sequencer.close();

@@ -238,7 +238,7 @@ public final class IdlingEventQueue extends EventQueue {
             for (Iterator i = threadStats.values().iterator(); i.hasNext(); ) {
                 ThreadStats ts = (ThreadStats)i.next();
 //???           assert maxTime <= delta;
-                assert ts.totalIdle + ts.totalWork <= maxTime;
+//???           assert ts.totalIdle + ts.totalWork <= maxTime;
                 ts.load = (int)(ts.totalWork * 100 / delta);
                 maxLoad = Math.max(maxLoad, ts.load);
 //              Debug.traceln("thread work time " + Clock.milliseconds(ts.totalWork) + " milliseconds (" + ts.load + "%)");

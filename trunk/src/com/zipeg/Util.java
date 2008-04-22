@@ -159,6 +159,31 @@ public final class Util {
         return data;
     }
 
+    public static Map getenv() {
+        return getJavaVersion() < 1.5 ? null :
+                (Map)callStatic("java.lang.System.getenv", Util.NONE);
+    }
+
+    public static String[] getEnvFilterOutMacCocoaCFProcessPath() {
+        // http://lists.apple.com/archives/printing/2003/Apr/msg00074.html
+        // it definitely breaks Runtime.exec("/usr/bin/open", ...) on Leopard
+        String[] env = null;
+        Map v = Util.getenv();
+        if (v != null) {
+            ArrayList a = new ArrayList();
+            for (Iterator i = v.entrySet().iterator(); i.hasNext(); ) {
+                Map.Entry e = (Map.Entry)i.next();
+                String key = (String)e.getKey();
+//              Debug.traceln(key + "=" + e.getValue());
+                if (!"CFProcessPath".equalsIgnoreCase(key)) {
+                    a.add(key + "=" + e.getValue());
+                }
+            }
+            env = (String[])a.toArray(new String[a.size()]);
+        }
+        return env;
+    }
+
     public static File getCacheDirectory() {
         // System.getProperty("user.home")/Library/Caches/com.zipeg/ is unhappy place for Finder!
         // see study/DnD project
@@ -223,9 +248,9 @@ public final class Util {
     private static InputStream getVersionFileInputStream() throws FileNotFoundException {
         File file = getVersionFile(); // always try the Content/version first
         return file.canRead() ? new FileInputStream(file) :
-               Resources.class.getResourceAsStream("version.txt");
+               Resources.getResourceAsStream("version.txt");
     }
-    
+
     public static File getVersionFile() {
         String url = Resources.class.getResource("Util.class").toString();
         // jar:file:/Users/~/xepec.com/svn/src/trunk/zipeg/Zipeg.app/Contents/Resources/Java/zipeg.jar!/...
@@ -263,6 +288,8 @@ public final class Util {
     public static String plural(int n, String s) {
         return n + " " + (n != 11 && n % 10 == 1 ? s : (s + "s"));
     }
+
+    // TODO: 1. isMac() 2. On Win32 does not work with Unicode names
 
     public static void openDoc(String filepath) {
         assert isWindows() : "only on Win32";
@@ -380,21 +407,21 @@ public final class Util {
      */
     public static void callMainOnNewProcess(String cls, String[] args) {
         File wd = new File(getCanonicalPath(new File(".")));
+        InputStream i = null;
+        FileOutputStream o = null;
         try {
             String c = cls + ".class";
-            InputStream i = Util.class.getResource(c).openStream();
+            i = Util.class.getResource(c).openStream();
             File car = new File(wd, "com/zipeg/" + c);
             car.delete();
             car.getParentFile().mkdirs();
             car.createNewFile();
-            FileOutputStream o = new FileOutputStream(car);
-            int n = i.available();
-            byte[] buff = new byte[n];
-            int k = i.read(buff);
-            assert k == n;
-            o.write(buff);
+            o = new FileOutputStream(car);
+            copyStream(i, o);
             close(i);
+            i = null;
             close(o);
+            o = null;
             String[] a = new String[args.length + 2];
             a[0] = getJava();
             a[1] = "com.zipeg." + cls;
@@ -406,10 +433,22 @@ public final class Util {
 */
         } catch (Throwable e) { // IOException or InterruptedException
             throw new Error(e);
+        } finally {
+            close(i);
+            close(o);
+        }
+    }
+
+    public static void copyStream(InputStream in, OutputStream out) throws IOException {
+        byte[] buffer = new byte[16*1024];
+        int len;
+        while ((len = in.read(buffer)) >= 0) {
+            out.write(buffer, 0, len);
         }
     }
 
     /**
+     * TODO: make atomic
      * Copy full content of existing file "from" into <b>new</b> file "to".
      * On OSX does not preserve resource fork and file finder attributes. Use
      * only when absolutely sure that those are not needed.
@@ -442,6 +481,7 @@ public final class Util {
     }
 
     /**
+     * TODO: make atomic
      * Copy full content of existing file "from" into <b>new</b> file "to"
      * preserving resource fork and dir attrs. Does not copy over!
      * @param from source file (must exist and be readable)
@@ -482,6 +522,99 @@ public final class Util {
         }
     }
 
+    public static boolean rmdirs(File dir) {
+        if (!dir.isDirectory()) {
+            return false;
+        }
+        boolean b = true;
+        File[] list = dir.listFiles();
+        if (list != null) { // dir stopped being directory (e.g. deleted from another process)
+            for (int i = 0; i < list.length; i++) {
+                b = (list[i].isDirectory() ? rmdirs(list[i]) : list[i].delete()) && b;
+            }
+        }
+        b = dir.delete() && b;
+        return b;
+    }
+
+    public static Object callStatic(String method, Object[] params) {
+        try {
+            int ix = method.lastIndexOf('.');
+            String cls = method.substring(0, ix);
+            String mtd = method.substring(ix + 1);
+            Class[] signature;
+            if (params.length == 0) {
+                signature = new Class[]{};
+            } else {
+                signature = new Class[params.length];
+                for (int i = 0; i < params.length; i++) {
+                    signature[i] = params[i].getClass();
+                }
+            }
+            return Class.forName(cls).getMethod(mtd, signature).invoke(null, params);
+        } catch (Throwable e) {
+            e.printStackTrace();
+            throw new Error(e);
+        }
+    }
+
+    public static Method getDeclaredMethod(String method, Class[] s) {
+        try {
+            int ix = method.lastIndexOf('.');
+            String cls = method.substring(0, ix);
+            String mtd = method.substring(ix + 1);
+            Method m = Class.forName(cls).getDeclaredMethod(mtd, s);
+            m.setAccessible(true);
+            return m;
+        } catch (NoSuchMethodException e) {
+            Debug.printStackTrace("no such method " + method, e);
+            return null;
+        } catch (ClassNotFoundException e) {
+            Debug.printStackTrace("class not found " + method, e);
+            return null;
+        }
+    }
+
+    public static Object call(Method m, Object that, Object[] params) {
+        try {
+            return m == null ? null : m.invoke(that, params);
+        } catch (IllegalAccessException e) {
+            Debug.printStackTrace("failed to call " + m, e);
+            return null;
+        } catch (InvocationTargetException e) {
+            Debug.printStackTrace("failed to call " + m, e);
+            return null;
+        }
+    }
+
+    public static void openUrl(String url) {
+        if (isMac) {
+            callStatic("com.apple.eio.FileManager.openURL", new Object[]{url});
+        } else {
+            try {
+                Runtime.getRuntime().exec("rundll32 url.dll,FileProtocolHandler " + url);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    public static void sendMail(String email, String title, String body) {
+        try {
+            final int MAX_LENGTH = 1200;
+            if (isWindows && body.length() > MAX_LENGTH) {
+                body = body.substring(0, MAX_LENGTH);
+            }
+            body = spaces(URLEncoder.encode(body, "UTF-8"));
+            title = spaces(URLEncoder.encode(title, "UTF-8"));
+            openUrl("mailto:" + email + "?subject=" + title + "&body=" + body);
+        }
+        catch (IOException e) {
+            // noinspection CallToPrintStackTrace
+            e.printStackTrace();
+        }
+    }
+
     /**
      * HTTP GET
      * @param url to get from
@@ -508,64 +641,6 @@ public final class Util {
     public static boolean postToUrl(String url, Map headers, Map reply, ByteArrayOutputStream body)
             throws IOException {
         return httpGetPost(true, url, headers, reply, body);
-    }
-
-    private static float parseOsVersion() {
-        String v = System.getProperty("os.version");
-        // Mac: 10.4.8
-        // Windows: 5.1
-        if (!isMac() && !isWindows()) {
-            assert false : v + " debug me on Linux";
-        }
-        int ix = v.indexOf('.');
-        if (ix > 0) {
-            String s = v.substring(ix + 1);
-            v = v.substring(0, ix + 1) + s.replaceAll("\\.", "").replaceAll("_", "");
-        }
-        ix = 0;
-        while (ix < v.length() && (Character.isDigit(v.charAt(ix)) ||
-                                   v.charAt(ix) == '.')) {
-            ix++;
-        }
-        v = v.substring(0, ix);
-        return Float.parseFloat(v);
-    }
-
-    private static String readVersionAndRevision() {
-        Properties p = new Properties();
-        String v = "0.0.0.0 (development)";
-        InputStream is = null;
-        try {
-            is = getVersionFileInputStream();
-            if (is != null) {
-                p.load(is);
-                String s = p.getProperty("version").trim();
-                int ix = s == null ? -1 : s.lastIndexOf('.');
-                if (s != null && ix > 0) {
-                    revision = Integer.decode(s.substring(ix + 1)).intValue();
-                    v = s;
-                }
-            }
-        } catch (IOException iox) {
-            /* ignore */
-        } catch (NumberFormatException nfx) {
-            /* ignore */
-        } finally {
-            close(is);
-        }
-        Debug.traceln("zipeg " + v);
-        return v;
-    }
-
-    public static boolean rmdirs(File dir) {
-        if (!dir.isDirectory()) return false;
-        boolean b = true;
-        File[] list = dir.listFiles();
-        for (int i = 0; i < list.length; i++) {
-            b = (list[i].isDirectory() ? rmdirs(list[i]) : list[i].delete() )&& b;
-        }
-        b = dir.delete() && b;
-        return b;
     }
 
     /**
@@ -673,82 +748,51 @@ public final class Util {
         }
     }
 
-    static Object callStatic(String method, Object[] params) {
+    private static float parseOsVersion() {
+        String v = System.getProperty("os.version");
+        // Mac: 10.4.8
+        // Windows: 5.1
+        if (!isMac() && !isWindows()) {
+            assert false : v + " debug me on Linux";
+        }
+        int ix = v.indexOf('.');
+        if (ix > 0) {
+            String s = v.substring(ix + 1);
+            v = v.substring(0, ix + 1) + s.replaceAll("\\.", "").replaceAll("_", "");
+        }
+        ix = 0;
+        while (ix < v.length() && (Character.isDigit(v.charAt(ix)) ||
+                                   v.charAt(ix) == '.')) {
+            ix++;
+        }
+        v = v.substring(0, ix);
+        return Float.parseFloat(v);
+    }
+
+    private static String readVersionAndRevision() {
+        Properties p = new Properties();
+        String v = "0.0.0.0 (development)";
+        InputStream is = null;
         try {
-            int ix = method.lastIndexOf('.');
-            String cls = method.substring(0, ix);
-            String mtd = method.substring(ix + 1);
-            Class[] signature;
-            if (params.length == 0) {
-                signature = new Class[]{};
-            } else {
-                signature = new Class[params.length];
-                for (int i = 0; i < params.length; i++) {
-                    signature[i] = params[i].getClass();
+            is = getVersionFileInputStream();
+            if (is != null) {
+                p.load(is);
+                String s = p.getProperty("version").trim();
+                int ix = s == null ? -1 : s.lastIndexOf('.');
+                if (s != null && ix > 0) {
+                    revision = Integer.decode(s.substring(ix + 1)).intValue();
+                    v = s;
                 }
             }
-            return Class.forName(cls).getMethod(mtd, signature).invoke(null, params);
-        } catch (Throwable e) {
-            e.printStackTrace();
-            throw new Error(e);
+        } catch (IOException iox) {
+            /* ignore */
+        } catch (NumberFormatException nfx) {
+            /* ignore */
+        } finally {
+            close(is);
         }
-    }
-
-    public static Method getDeclaredMethod(String method, Class[] s) {
-        try {
-            int ix = method.lastIndexOf('.');
-            String cls = method.substring(0, ix);
-            String mtd = method.substring(ix + 1);
-            Method m = Class.forName(cls).getDeclaredMethod(mtd, s);
-            m.setAccessible(true);
-            return m;
-        } catch (NoSuchMethodException e) {
-            Debug.printStackTrace("no such method " + method, e);
-            return null;
-        } catch (ClassNotFoundException e) {
-            Debug.printStackTrace("class not found " + method, e);
-            return null;
-        }
-    }
-
-    public static Object call(Method m, Object that, Object[] params) {
-        try {
-            return m == null ? null : m.invoke(that, params);
-        } catch (IllegalAccessException e) {
-            Debug.printStackTrace("failed to call " + m, e);
-            return null;
-        } catch (InvocationTargetException e) {
-            Debug.printStackTrace("failed to call " + m, e);
-            return null;
-        }
-    }
-
-    public static void openUrl(String url) {
-        if (isMac) {
-            callStatic("com.apple.eio.FileManager.openURL", new Object[]{url});
-        } else {
-            try {
-                Runtime.getRuntime().exec("rundll32 url.dll,FileProtocolHandler " + url);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-    }
-
-    public static void sendMail(String email, String title, String body) {
-        try {
-            final int MAX_LENGTH = 1200;
-            if (isWindows && body.length() > MAX_LENGTH) {
-                body = body.substring(0, MAX_LENGTH);
-            }
-            body = spaces(URLEncoder.encode(body, "UTF-8"));
-            title = spaces(URLEncoder.encode(title, "UTF-8"));
-            openUrl("mailto:" + email + "?subject=" + title + "&body=" + body);
-        }
-        catch (IOException e) {
-            // noinspection CallToPrintStackTrace
-            e.printStackTrace();
-        }
+        Debug.traceln("zipeg " + v);
+        return v;
     }
 
     private static String spaces(String s) {
@@ -765,7 +809,7 @@ public final class Util {
         return r.toString();
     }
 
-    public static float parseJavaVersion() {
+    private static float parseJavaVersion() {
         String v = System.getProperty("java.version");
         int ix = v.indexOf('.');
         if (ix > 0) {
@@ -841,38 +885,63 @@ public final class Util {
     }
 
     /**
-     * In Java 1.6 should be replaced with
-     *      new JDialog(MainFrame.getTopFrame(), Dialog.ModalityType.DOCUMENT_MODAL);
+     * creates document modal dialog and centers it in the owner window
      * @param parent window
      * @return modal JDialog
      */
-    static JDialog createDocumentModalDialog(JFrame parent) {
-        JDialog dlg;
-        try {
-            Class mt = Class.forName("java.awt.Dialog$ModalityType");
-            Field dm = mt.getField("DOCUMENT_MODAL");
-            Class[] sig = new Class[]{Window.class, mt};
-            Constructor c = JDialog.class.getConstructor(sig);
-            Object[] params = new Object[]{parent, dm.get(null)};
-            dlg = (JDialog)c.newInstance(params);
-        } catch (ClassNotFoundException e) {
-            dlg = new JDialog(parent);
-            dlg.setModal(true);
-        } catch (NoSuchFieldException e) {
-            throw new Error(e);
-        } catch (NoSuchMethodException e) {
-            throw new Error(e);
-        } catch (IllegalAccessException e) {
-            throw new Error(e);
-        } catch (InvocationTargetException e) {
-            throw new Error(e);
-        } catch (InstantiationException e) {
-            throw new Error(e);
+    public static JDialog createDocumentModalDialog(final JFrame parent) {
+        Throwable x = null;
+        JDialog d = null;
+        boolean documentModalSheet = Util.isMac() && Util.getJavaVersion() >= 1.6 && parent != null;
+        if (documentModalSheet) {
+            try {
+                Class mt = Class.forName("java.awt.Dialog$ModalityType");
+                Field dm = mt.getField("DOCUMENT_MODAL");
+                Class[] sig = new Class[]{Window.class, mt};
+                Constructor c = JDialog.class.getConstructor(sig);
+                Object[] params = new Object[]{parent, dm.get(null)};
+                d = (JDialog)c.newInstance(params);
+            } catch (ClassNotFoundException e) { x = e;
+            } catch (NoSuchFieldException e) { x = e;
+            } catch (NoSuchMethodException e) { x = e;
+            } catch (IllegalAccessException e) { x = e;
+            } catch (InvocationTargetException e) { x = e;
+            } catch (InstantiationException e) { x = e;
+            }
+            if (x != null) {
+                throw new Error(x);
+            }
         }
-        boolean modalSheet = isMac() && getJavaVersion() >= 1.6;
-        if (modalSheet) {
-            MainFrame.getInstance().getRootPane().putClientProperty("apple.awt.documentModalSheet", "true");
+        if (d == null) {
+            d = new JDialog(parent) {
+                public void validate() {
+                    super.validate();
+                    if (getParent() != null) {
+                        try {
+                            setLocationRelativeTo(getParent());
+                        } catch (Throwable t) {
+                            // known not to work sometimes
+                        }
+                    }
+
+                }
+            };
+            d.setModal(true);
+        }
+        final JDialog dlg = d;
+        if (documentModalSheet) {
+            parent.getRootPane().putClientProperty("apple.awt.documentModalSheet", "true");
             dlg.getRootPane().putClientProperty("apple.awt.documentModalSheet", "true");
+        } else {
+            // in case validate() overwrite fails:
+            dlg.addComponentListener(new ComponentAdapter() {
+                public void componentShown(ComponentEvent e) {
+                    Window owner = parent != null ? parent : dlg.getOwner();
+                    assert owner != null : "search for SwingUtilities.getSharedOwnerFrame() usage";
+                    dlg.setLocationRelativeTo(owner);
+                    dlg.removeComponentListener(this);
+                }
+            });
         }
         return dlg;
     }

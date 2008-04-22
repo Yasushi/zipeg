@@ -11,6 +11,9 @@ import java.util.HashSet;
 // bash> ll /Library/Caches/*Launch*
 
 
+// Leopard: /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister
+
+
 public class DefaultRoleHandler implements FileAssociationHandler {
 
     private static boolean loaded;
@@ -19,17 +22,18 @@ public class DefaultRoleHandler implements FileAssociationHandler {
     private static final String bundleId = "com.zipeg.zipeg";
     private static final Set BOM = new HashSet() {{
         // see: /System/Library/CoreServices/BOMArchiveHelper.app/Contents/Info.plist
-        add("cpio");
+        // http://developer.apple.com/documentation/Carbon/Conceptual/understanding_utis/utilist/chapter_4_section_1.html
+        add("cpio");    add("public.cpio-archive");
         add("cpgz");
-        add("zip");
-        add("tar");
-        add("tgz");
+        add("zip");     add("public.zip-archive");
+        add("tar");     add("public.tar-archive");   add("org.gnu.gnu-tar-archive");
+        add("tgz");     add("org.gnu.gnu-zip-tar-archive");
         add("tbz");
         add("tbz2");
-        add("gz");
-        add("z");
+        add("gz");      add("org.gnu.gnu-zip-archive");
+        add("z");       add("com.public.z-archive");
         add("bz");
-        add("bz2");
+        add("bz2");     add("public.archive.bzip2");
     }};
 
     private DefaultRoleHandler() {
@@ -68,7 +72,7 @@ public class DefaultRoleHandler implements FileAssociationHandler {
 
     public void setHandled(long selected) {
         long current = getHandled();
-//      Debug.traceln("\n>setHandled(" + Long.toHexString(selected) + ")");
+        Debug.traceln("\n>setHandled(" + Long.toHexString(selected) + ")");
         boolean changed = false;
         for (int i = 0; i < ext2uti.length; i++) {
             long bit = 1L << i;
@@ -76,6 +80,7 @@ public class DefaultRoleHandler implements FileAssociationHandler {
                 continue;
             }
             String uti = (String)ext2uti[i][3]; // unique type identifier
+            String ext = (String)ext2uti[i][0];
             if ((bit & selected) != 0) {
                 assert (bit & current) == 0;
                 // save existing
@@ -85,12 +90,19 @@ public class DefaultRoleHandler implements FileAssociationHandler {
 //                  Debug.trace(" \t" + roleNames[j] + "=" + handler);
                     if (!isMineOrEmpty(handler)) {
                         Presets.put("drh." + roleNames[j] + ":" + uti, handler);
+                        Presets.sync();
                     }
                 }
 //              Debug.traceln();
                 setIgnoreCreator(uti, true);
                 setForContentType(uti, bundleId, kRoleNone|kRoleViewer|kRoleEditor|kRoleShell);
                 setForContentType(uti, bundleId, kRoleAll);
+                String[] a = (String[])aliases.get(uti);
+                for (int k = 0; a != null && k < a.length; k++) {
+                    setIgnoreCreator(a[k], true);
+                    setForContentType(a[k], bundleId, kRoleNone|kRoleViewer|kRoleEditor|kRoleShell);
+                    setForContentType(a[k], bundleId, kRoleAll);
+                }
             } else {
                 assert (bit & current) != 0;
                 assert (bit & selected) == 0;
@@ -110,7 +122,10 @@ public class DefaultRoleHandler implements FileAssociationHandler {
                         if (dominant != null) {
                             handler = dominant;
                         } else {
-                            handler = BOM.contains(uti) ? "com.apple.bomarchivehelper" : "";
+                            // null and "" are not good -
+                            // LSSetDefaultRoleHandlerForContentType( handler == null or "") is NOP.
+                            handler = BOM.contains(uti) || BOM.contains(ext) ? "com.apple.bomarchivehelper" :
+                                      " ";
                         }
                     }
                     setForContentType(uti, handler, roles[j]);
@@ -122,7 +137,9 @@ public class DefaultRoleHandler implements FileAssociationHandler {
         }
         if (changed) {
             try {
-                Process p = Runtime.getRuntime().exec(new String[]{"osascript", "fnotify.compiled.scpt"});
+                Process p = Runtime.getRuntime().exec(
+                        new String[]{"osascript", "fnotify.compiled.scpt"},
+                        Util.getEnvFilterOutMacCocoaCFProcessPath());
                 if (Debug.isDebug()) {
                     p.waitFor();
                     Debug.traceln("exit code " + p.exitValue());
@@ -184,11 +201,11 @@ public class DefaultRoleHandler implements FileAssociationHandler {
 
     // commented out methods are implemented and tested. just not used at the moment
 
-    private native int setForContentType(String contentTyle, String bundle, int role);
-//  private native int setForURLScheme(String contentTyle, String bundle);
-    private native int setIgnoreCreator(String contentTyle, boolean b);
-    private native String getForContentType(String contentTyle, int role);
-//  private native String getForURLScheme(String contentTyle);
+    private native int setForContentType(String contentType, String bundle, int role);
+//  private native int setForURLScheme(String contentType, String bundle);
+    private native int setIgnoreCreator(String contentType, boolean b);
+    private native String getForContentType(String contentType, int role);
+//  private native String getForURLScheme(String contentType);
 //  private native boolean getIgnoreCreator(String contentType);
 
     /*  DO NOT DO:
@@ -235,7 +252,7 @@ Discussion
 This bit mask is passed to functions that find the preferred application for a given item or
 family of items (LSGetApplicationForItem, LSGetApplicationForURL, LSGetApplicationForInfo),
 or that determine whether a given application can open a designated item (LSCanRefAcceptItem,
-LSCanURLAcceptURL), to specify the applicationÕs desired role or roles with respect to the item.
+LSCanURLAcceptURL), to specify the applicationï¿½s desired role or roles with respect to the item.
 For example, to request only an editor application, specify kLSRolesEditor; if either an editor
 or a viewer application is acceptable, specify kLSRolesEditor | kLSRolesViewer.
 

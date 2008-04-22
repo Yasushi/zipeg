@@ -4,6 +4,7 @@ import java.util.*;
 import java.util.List;
 import java.awt.event.*;
 import java.awt.*;
+import java.awt.image.BufferedImage;
 import java.lang.reflect.*;
 import javax.swing.*;
 
@@ -133,28 +134,26 @@ public final class Actions extends HashMap {
         tb.setRequestFocusEnabled(true);
 //      addButton(tb, "openzip", "commandFileOpen", "open archive");
         String prefix = Util.isMac() ? "mac." : "win.";
-        addButton(tb, prefix + "open40x40", "commandFileOpen", "open archive");
+        addButton(tb, "open", "commandFileOpen", "Open archive.");
         tb.addSeparator(new Dimension(2, 1));
-        addButton(tb, prefix + "extract40x40", "commandActionsExtract", "extract selected items from the archive");
+        addButton(tb, "extract", "commandActionsExtract", "Extract selected items from the archive.");
         tb.addSeparator(new Dimension(2, 1));
-        String preview = (Util.isMac() ? "mac." : "win.") + "preview40x40";
-        addButton(tb, preview, "commandActionsPreview", "open selected items in Preview or associated Application");
+        String preview = prefix + "preview";
+        addButton(tb, preview, "commandActionsPreview", "Open selected items in Preview or associated application.");
         tb.addSeparator(new Dimension(10, 1));
-        addButton(tb, "settings40x40", "commandToolsOptions", Util.isMac() ? "Preferences" : "Zipeg Options");
+        addButton(tb, "preferences", "commandToolsOptions", Util.isMac() ? "Preferences." : "Zipeg options.");
         addSpacer(tb, 10);
         int count = Presets.getInt("extract.count", 0);
-        if (count > 1000) {
-            addButton(tb, "donate40x40", "commandHelpDonate",
+        if (count > 89) {
+            addButton(tb, "donate", "commandHelpDonate",
                     "<html><body>" +
-                    "<span style=\"font-size:18pt;\">&#x0263A;</span>" +
-                    "<i>You do tip the cook and the waiter, do you?</i>" +
-                    "<span style=\"font-size:18pt;\">&#x0263A;</span>&nbsp;<br>" +
-                    "<center>Zipeg opened " + count + " archives for you.</center><br>" +
-                    "<center>Please consider small donation...</center>" +
-                    "</span></body></html>");
+                    "<center>&nbsp;Zipeg helped you with " + count + " archives.&nbsp;</center>" +
+                    "<center>&nbsp;Could you please help Zipeg development&nbsp;<br>&nbsp;with a small donation?&nbsp;</center>" +
+                    "<center>&nbsp;Thank you!&nbsp;</center><br>" +
+                    "</body></html>");
             tb.addSeparator(new Dimension(2, 1));
         }
-        addButton(tb, "www40x40", "commandHelpWeb", "Visit www.zipeg.com");
+        addButton(tb, "internet", "commandHelpWeb", "Visit www.zipeg.com");
         return tb;
     }
 
@@ -176,16 +175,24 @@ public final class Actions extends HashMap {
             addAction(method, aa);
         }
         JButton btn = new JButton(aa);
-        btn.setPreferredSize(new Dimension(42, 42));
         btn.setBorderPainted(false);
         btn.setRolloverEnabled(true);
-        btn.setIcon(Resources.getImageIcon(iconname, 40));
-        if (Resources.hasImageIcon(iconname + "h")) {
-            btn.setRolloverIcon(Resources.getImageIcon(iconname + "h", 40));
-        }
-        String tt = "<html><body><h5>&nbsp;" + tooltip + "&nbsp;</h5></body></html>";
+        BufferedImage i = Resources.asBufferedImage(Resources.getImage(iconname));
+        BufferedImage bi = Resources.asBufferedImage(i, +1, +2);
+        btn.setIcon(new ImageIcon(bi));
+        bi = Resources.asBufferedImage(i, +2, +3);
+        btn.setPressedIcon(new ImageIcon(bi));
+
+        bi = Resources.asBufferedImage(i, +1, 0);
+        Resources.adjustHSB(bi, 1.2f, 2); // increase brightness by 20%
+        btn.setRolloverIcon(new ImageIcon(bi));
+        btn.setRolloverSelectedIcon(new ImageIcon(bi));
+
+        btn.setPreferredSize(new Dimension(i.getWidth() + 8, i.getHeight() + 5));
+        String tt = "<html><body>&nbsp;" + tooltip + "&nbsp;</body></html>";
         btn.setToolTipText(tt);
         btn.setAction(aa);
+        btn.setBorderPainted(false);
         btn.setFocusable(false);
         tb.add(btn);
     }
