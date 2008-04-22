@@ -82,11 +82,20 @@ public class Win32ShellFolderManager6372808 extends Win32ShellFolderManager2 {
             }
             return folders.toArray(new File[folders.size()]);
         }
-        return super.get(key);
+        try {
+            return super.get(key);
+        } catch (Throwable x) {
+            Debug.printStackTrace("get(" + key + ")", x);
+            return null;
+        }
     }
 
     private static boolean isFileSystem(File folder) {
         Method isFileSystem = Util.getDeclaredMethod(folder.getClass().getName() + ".isFileSystem", new Class[]{});
+        String name = folder.getName().toLowerCase();
+        if (Util.isArchiveFileType(name)) {
+            return false;
+        }
         Boolean b = (Boolean)Util.call(isFileSystem, folder, Util.NONE);
 //      Debug.traceln("isFileSystem(" + folder + ")=" + (b != null && b.booleanValue()));
         return b != null && b.booleanValue();

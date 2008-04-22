@@ -19,6 +19,7 @@ public class Z7 implements Archiver {
     private boolean encrypted;
     private int decodeErrorCount = 0;
     private char[] nameBuffer = new char[16*1024];
+    private static boolean loaded;
 
     public Z7(File file) throws IOException {
         this(file, null);
@@ -36,8 +37,12 @@ public class Z7 implements Archiver {
         if (archive == 0) {
             throw new IOException("unsupported format");
         }
-        if (needsPassword(archive) != 0) {
-            return;
+        try {
+            if (needsPassword(archive) != 0) {
+                return;
+            }
+        } catch (UnsatisfiedLinkError e) {
+            Zipeg.redownload();
         }
         long n = getArchiveSize(archive);
         if (n >= Integer.MAX_VALUE / 2) {
@@ -138,7 +143,7 @@ public class Z7 implements Archiver {
     }
 
     public InputStream getInputStream(ZipEntry entry) throws IOException {
-        return null;
+        return null; // TODO: not implemented
     }
 
     public Iterator getEntries() {
@@ -162,24 +167,34 @@ public class Z7 implements Archiver {
     }
 
     public void extractEntry(ZipEntry e, File file, String pwd) throws IOException {
-        Zip7Entry z7e = (Zip7Entry)e;
-        boolean exists = file.exists();
-        File parent = file.getParentFile();
-        if (!parent.isDirectory()) {
-            parent.mkdirs();
-            ZipEntry p = getEntry(new File(z7e.getName()).getParent());
-            if (p != null) {
-                parent.setLastModified(p.getTime());
+        if (!(e instanceof Zip7Entry)) {
+            assert e.isDirectory() : "placeholder entry is not for directory: " + e.getName();
+            if (e.isDirectory()) {
+                file.mkdirs();
+            } else {
+                file.createNewFile();
             }
-        }
-        long r = extractItem(archive, z7e.index,
-                             Util.getCanonicalPath(file), pwd == null ? "" : pwd);
-        if (r != 0) {
-            if (!exists) {
-                file.delete();
+        } else {
+            Zip7Entry z7e = (Zip7Entry)e;
+            boolean exists = file.exists();
+            File parent = file.getParentFile();
+            if (!parent.isDirectory()) {
+                parent.mkdirs();
+                // TODO: do it for all non-existing parents
+                ZipEntry p = getEntry(new File(z7e.getName()).getParent());
+                if (p != null) {
+                    parent.setLastModified(p.getTime());
+                }
             }
-            z7e.error = getMessage(r);
-            throw new IOException(z7e.error + " extracting item \"" + e.getName() + "\"");
+            long r = extractItem(archive, z7e.index,
+                                 Util.getCanonicalPath(file), pwd == null ? "" : pwd);
+            if (r != 0) {
+                if (!exists) {
+                    file.delete();
+                }
+                z7e.error = getMessage(r);
+                throw new IOException(z7e.error + " extracting item \"" + e.getName() + "\"");
+            }
         }
     }
 
@@ -295,7 +310,15 @@ public class Z7 implements Archiver {
     }
 
     public static void loadLibrary() {
-        System.loadLibrary(getLibraryName());
+        assert IdlingEventQueue.isDispatchThread();
+        if (!loaded) {
+            try {
+                System.loadLibrary(getLibraryName());
+            } catch (UnsatisfiedLinkError e) {
+                Zipeg.redownload();
+            }
+            loaded = true;
+        }
     }
 
     public static String getLibraryName() {
@@ -304,7 +327,9 @@ public class Z7 implements Archiver {
             String cpu = "powerpc".equals(p) ? "ppc" : p;
             return "7za-osx-" + cpu;
         } else {
+            // TODO: Linux?
             return "7za-win-i386";
+//          return "7za-win-i386-dbg";
         }
     }
 
@@ -467,6 +492,7 @@ public class Z7 implements Archiver {
     private String decodeFileName(String s) {
         try {
             if (!sbc) {
+                // TODO: may be necessry to do UTF-16BE vs UTF-16LE
                 return s; // utf-16 (aka UNICODE)
             } else if (utf8) {
                 byte[] bytes = new byte[s.length()];

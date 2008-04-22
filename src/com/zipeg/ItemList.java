@@ -1,6 +1,7 @@
 package com.zipeg;
 
 import javax.swing.*;
+import javax.swing.border.*;
 import javax.swing.filechooser.FileView;
 import javax.swing.tree.*;
 import javax.swing.event.*;
@@ -14,6 +15,7 @@ import java.util.*;
 import java.util.List;
 import java.text.*;
 import java.io.*;
+import java.lang.reflect.Method;
 
 public final class ItemList extends JTable implements TreeSelectionListener {
 
@@ -26,13 +28,13 @@ public final class ItemList extends JTable implements TreeSelectionListener {
     };
 
     private static final int HORIZONTAL_SPACING = 8;
-    private static final String PASSWD = Util.isWindows() ? "‡" : "à"; // "?", "?", "?", "†", "‡", "©";
+    private static final String PASSWD = "\u2021"; // double dagger
     private static final TreeElement[] EMPTY = new TreeElement[]{};
     private static final Map iconTypeCache = new HashMap();
     private static final Map iconFileCache = new HashMap();
     private static final int W;
     private static final int H;
-    private static final FileView fv;
+    private static FileView fv;
     private static final Icon fileIcon;
     private static final Icon folderIcon;
     private TreeElement parent;
@@ -115,8 +117,6 @@ public final class ItemList extends JTable implements TreeSelectionListener {
     };
 
     static {
-        JFileChooser fc = FileChooser.getInstance();
-        fv = fc.getUI().getFileView(fc);
         fileIcon = UIManager.getIcon("FileView.fileIcon");
         Icon folder = UIManager.getIcon("Tree.closedIcon"); // looks better than "FileView.directoryIcon"
         if (folder == null) {
@@ -125,10 +125,8 @@ public final class ItemList extends JTable implements TreeSelectionListener {
         folderIcon = folder;
         assert fileIcon != null;
         assert folderIcon != null;
-        File test = new File("test.txt");
-        Icon icon = getFileTypeIcon(test);
-        W = icon.getIconWidth();
-        H = icon.getIconHeight();
+        W = Math.max(folderIcon.getIconWidth(), fileIcon.getIconWidth());
+        H = Math.max(folderIcon.getIconHeight(), fileIcon.getIconHeight());
     }
 
     ItemList() {
@@ -168,6 +166,18 @@ public final class ItemList extends JTable implements TreeSelectionListener {
         });
         setDragEnabled(true);
         setTransferHandler(new FileTransferHandler());
+        // see: http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6579129
+        // setAutoCreateRowSorter since 1.5
+        Method setAutoCreateRowSorter;
+        try {
+            Class[] signature = new Class[]{boolean.class};
+            setAutoCreateRowSorter = JTable.class.getMethod("setAutoCreateRowSorter", signature);
+        } catch (NoSuchMethodException e) {
+            setAutoCreateRowSorter = null;
+        }
+        if (setAutoCreateRowSorter != null) {
+            Util.call(setAutoCreateRowSorter, this, new Object[]{Boolean.FALSE});
+        }
         getTableHeader().addMouseListener(new HeaderMouseHandler());
         getTableHeader().setDefaultRenderer(new SortableHeaderRenderer(this.tableHeader.getDefaultRenderer()));
     }
@@ -217,7 +227,7 @@ public final class ItemList extends JTable implements TreeSelectionListener {
 
     public void enterDirectory(Object param) {
         assert param instanceof TreeElement;
-        assert param == parent;
+        assert param == parent; // I have one crash report from 2.0.0.777 with this failing....
         requestFocus();
     }
 
@@ -361,7 +371,7 @@ public final class ItemList extends JTable implements TreeSelectionListener {
         rect.setLocation(rect.x - pt.x, rect.y - pt.y);
         viewport.scrollRectToVisible(rect);
     }
-    
+
     public void updateCommandState(Map m) {
         int min = selectionModel.getMinSelectionIndex();
         int max = selectionModel.getMaxSelectionIndex();
@@ -470,22 +480,61 @@ public final class ItemList extends JTable implements TreeSelectionListener {
         }
     }
 
+    private static void addFile(Map m, String k, File f) {
+        ArrayList a = (ArrayList)m.get(k);
+        if (a == null) {
+            a = new ArrayList(10);
+            m.put(k, a);
+        }
+        a.add(f);
+    }
+
     private void openListOnMac(ArrayList files, boolean open) throws IOException {
         if (files.isEmpty()) {
             return;
         }
-        String[] cmd = new String[files.size() + 1 + (open ? 0 : 1)];
-        int k = 0;
-        cmd[k++] = "open";
+        Map v2f = new HashMap();
         if (!open) {
-            cmd[k++] = "/Applications/Preview.app";
+            // group files by viewer application
+            for (Iterator j = files.iterator(); j.hasNext(); ) {
+                File file = (File)j.next();
+                assert file.exists() && !file.isDirectory();
+                Object[] p = new Object[]{Util.getCanonicalPath(file)};
+                String viewer = (String)Util.callStatic("com.zipeg.mac.MacSpecific.getCocoaApplicationForFile", p);
+                addFile(v2f, viewer, file);
+            }
+        } else {
+            // put all files into "null" key
+            v2f.put(null, files);
         }
-        for (Iterator i = files.iterator(); i.hasNext(); ) {
-            File temp = (File)i.next();
-            assert temp.exists() && !temp.isDirectory();
-            cmd[k++] = Util.getCanonicalPath(temp);
+        for (Iterator j = v2f.keySet().iterator(); j.hasNext(); ) {
+            String viewer = (String)j.next();
+            ArrayList fs = (ArrayList)v2f.get(viewer);
+            assert fs.size() > 0;
+            String[] cmd = new String[fs.size() + 1 + (open ? 0 : 2)];
+            int k = 0;
+            cmd[k++] = "/usr/bin/open";
+            if (!open) {
+                cmd[k++] = viewer == null ? "-b" : "-a";
+                cmd[k++] = viewer == null ? "com.apple.Preview" : viewer;
+            }
+            for (Iterator i = fs.iterator(); i.hasNext(); ) {
+                File temp = (File)i.next();
+                assert temp.exists() && !temp.isDirectory();
+                cmd[k++] = Util.getCanonicalPath(temp);
+            }
+            assert Util.isMac();
+            Process p = Runtime.getRuntime().exec(cmd,
+                    Util.getEnvFilterOutMacCocoaCFProcessPath());
+            try {
+                int exit = p.waitFor();
+                if (exit != 0) {
+                    Debug.traceln("exit code=" + exit);
+                }
+            } catch (InterruptedException e) {
+                throw new Error(e);
+            }
         }
-        Runtime.getRuntime().exec(cmd);
     }
 
     private void separate(ArrayList open, ArrayList preview) {
@@ -547,7 +596,7 @@ public final class ItemList extends JTable implements TreeSelectionListener {
 //      Debug.traceln("prefetch " + ix);
         TreeElement r = (TreeElement)a.getRoot();
         boolean nested = !Flags.getFlag(Flags.DONT_OPEN_NESTED);
-        if (nested && r != null && r.getDescendantFileCount() == 1 && 
+        if (nested && r != null && r.getDescendantFileCount() == 1 &&
             Util.isArchiveFileType(element.getFile())) {
             Debug.traceln("skip prefetching for nested archive: " + element.getFile());
             return;
@@ -837,7 +886,7 @@ public final class ItemList extends JTable implements TreeSelectionListener {
                                                  selection.getBlue(), 40);
                 }
                 p.setBackground(isLastFocused() ? selection : selection_dimmed);
-                if (Util.isWindows() && !isLastFocused()) {
+                if (!isLastFocused()) {
                     p.setForeground(t.getForeground());
                 }
             }
@@ -915,6 +964,10 @@ public final class ItemList extends JTable implements TreeSelectionListener {
             icon = (Icon)iconTypeCache.get(extension);
             if (icon == null) {
                 File f = File.createTempFile("icon", extension);
+                if (fv == null) {
+                    FileChooser fc = FileChooser.getInstance();
+                    fv = fc.getUI().getFileView(fc);
+                }
                 icon = fv.getIcon(f);
                 if (icon == null) {
                     icon = fileIcon;
@@ -927,6 +980,8 @@ public final class ItemList extends JTable implements TreeSelectionListener {
             return fileIcon;
         }
     }
+
+    // TODO: add text and html lists to the FileTransferable (it will help Finder)
 
     private static class FileTransferable implements Transferable {
 
@@ -1049,8 +1104,9 @@ public final class ItemList extends JTable implements TreeSelectionListener {
             IdlingEventQueue.invokeLater(new Runnable(){
                 public void run() {
                     try {
-                        Process p = Runtime.getRuntime().exec(new String[]{"osascript",
-                                                                           "cleanup.compiled.scpt"});
+                        Process p = Runtime.getRuntime().exec(
+                                new String[]{"osascript", "cleanup.compiled.scpt"},
+                                Util.getEnvFilterOutMacCocoaCFProcessPath());
                         p.waitFor();
                     } catch (Exception e) {
                         if (Debug.isDebug()) {
@@ -1067,6 +1123,8 @@ public final class ItemList extends JTable implements TreeSelectionListener {
             // into Icon View of any folder or desktop the items are droped on top of each other
             if (action != NONE && Util.isMac() && getSelectedCached().size() > 1) {
                 // tidy up (aka `Snap To Grid` or Finder/View/Clean Up) Icon View of Finder drop target
+                // TODO: it is possible to pass set of names (last names) of
+                // dropped files/folders to the AppleScript and optimize it N^2 algorithm
                 cleanupIconView();
             }
         }
@@ -1207,29 +1265,50 @@ public final class ItemList extends JTable implements TreeSelectionListener {
         }
 
         public void paintIcon(Component c, Graphics g, int x, int y) {
-            Color color = c == null ? Color.GRAY : c.getBackground();
+            Graphics2D g2d = (Graphics2D)g;
+            Color s = g2d.getColor();
+            Composite z = null;
             int dx = size;
             int dy = descending ? dx : -dx;
             y = y + size + (descending ? -dy : 0);
             int shift = descending ? 1 : -1;
-            g.translate(x, y);
+            if (Util.isMac()) {
+                g2d.translate(x + size / 2, y);
+                g2d.setColor(Color.GRAY);
+                for (int i = 0; i < size; i++) {
+                    int cx = (size - i) / 2;
+                    if (!descending) {
+                        g2d.drawLine(-cx, -i, cx, -i);
+                    } else {
+                        g2d.drawLine(-cx, i, cx, i);
+                    }
+                }
+                g2d.translate(-(x + size / 2), -y);
+                z = g2d.getComposite();
+                g2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.33f));
+            }
+            g2d.translate(x, y);
+            Color color = c == null ? Color.GRAY : c.getBackground();
             // Right diagonal.
-            g.setColor(color.darker());
-            g.drawLine(dx / 2, dy, 0, 0);
-            g.drawLine(dx / 2, dy + shift, 0, shift);
+            g2d.setColor(color.darker());
+            g2d.drawLine(dx / 2, dy, 0, 0);
+            g2d.drawLine(dx / 2, dy + shift, 0, shift);
             // Left diagonal.
-            g.setColor(color.brighter());
-            g.drawLine(dx / 2, dy, dx, 0);
-            g.drawLine(dx / 2, dy + shift, dx, shift);
+            g2d.setColor(color.brighter());
+            g2d.drawLine(dx / 2, dy, dx, 0);
+            g2d.drawLine(dx / 2, dy + shift, dx, shift);
             // Horizontal line.
             if (descending) {
-                g.setColor(color.darker().darker());
+                g2d.setColor(color.darker().darker());
             } else {
-                g.setColor(color.brighter().brighter());
+                g2d.setColor(color.brighter().brighter());
             }
-            g.drawLine(dx, 0, 0, 0);
-            g.setColor(color);
-            g.translate(-x, -y);
+            g2d.drawLine(dx, 0, 0, 0);
+            g2d.translate(-x, -y);
+            g2d.setColor(s);
+            if (Util.isMac()) {
+                g2d.setComposite(z);
+            }
         }
 
         public int getIconWidth() {
@@ -1241,7 +1320,9 @@ public final class ItemList extends JTable implements TreeSelectionListener {
         }
     }
 
+
     private class SortableHeaderRenderer implements TableCellRenderer {
+
         private TableCellRenderer tableCellRenderer;
 
         public SortableHeaderRenderer(TableCellRenderer tableCellRenderer) {
@@ -1254,10 +1335,25 @@ public final class ItemList extends JTable implements TreeSelectionListener {
                                                        boolean hasFocus,
                                                        int row,
                                                        int column) {
-            Component c = tableCellRenderer.getTableCellRendererComponent(table,
-                    value, isSelected, hasFocus, row, column);
+            Component c;
+            try {
+                c = tableCellRenderer.getTableCellRendererComponent(table,
+                        value, isSelected, hasFocus, row, column);
+            } catch (NullPointerException x) {
+                // see: http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6428968
+                // and  http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6578189
+                /*  XPDefaultRenderer.XPDefaultRenderer.getTableCellRendererComponent(...) {
+                        ...
+                        setBorder(new EmptyBorder(skin.getContentMargin()));
+                        return this;
+                    }
+                */
+                JLabel tcr = (JLabel)tableCellRenderer;
+                tcr.setBorder(new EmptyBorder(new Insets(4,4,4,4)));
+                c = tcr;
+            }
             if (c instanceof JLabel) {
-                JLabel l = (JLabel) c;
+                JLabel l = (JLabel)c;
                 l.setHorizontalTextPosition(JLabel.RIGHT);
                 int modelColumn = table.convertColumnIndexToModel(column);
                 l.setIcon(getHeaderRendererIcon(modelColumn, l.getFont().getSize()));
@@ -1266,11 +1362,12 @@ public final class ItemList extends JTable implements TreeSelectionListener {
         }
     }
 
-    protected Icon getHeaderRendererIcon(int column, int size) {
+    private Icon getHeaderRendererIcon(int column, int size) {
         if (column != sortColumn || sortDirection == 0) {
             return null;
         }
-        return new Arrow(sortDirection == -1, size * 3 / 4);
+        int n = size * 3 / 4 - (Util.isMac() ? 2 : 0);
+        return new Arrow(sortDirection == -1, n);
     }
 
 }

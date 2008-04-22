@@ -1,0 +1,68 @@
+MY_HOME=../../../myWindows
+
+RM=rm -f
+CFLAGS=-c \
+-I../../../myWindows \
+-I../../../ \
+-I../../../include_windows \
+  -DEXCLUDE_COM \
+  -DNO_REGISTRY \
+  -DFORMAT_7Z \
+  -DFORMAT_BZIP2 \
+  -DFORMAT_GZIP \
+  -DFORMAT_SPLIT \
+  -DFORMAT_TAR \
+  -DFORMAT_Z \
+  -DFORMAT_ZIP \
+  -DFORMAT_ARJ \
+  -DFORMAT_RAR \
+  -DFORMAT_LZH \
+  -DFORMAT_CHM \
+  -DFORMAT_CAB \
+  -DFORMAT_RPM \
+  -DFORMAT_CPIO \
+  -DFORMAT_NSIS \
+  -DFORMAT_ISO \
+  -DCOMPRESS_MT \
+  -DCOMPRESS_BCJ_X86 \
+  -DCOMPRESS_BCJ2 \
+  -DCOMPRESS_BZIP2 \
+  -DCOMPRESS_BZIP2_MT \
+  -DCOMPRESS_COPY \
+  -DCOMPRESS_DEFLATE \
+  -DCOMPRESS_DEFLATE64 \
+  -DCOMPRESS_IMPLODE \
+  -DCOMPRESS_LZMA \
+  -DCOMPRESS_MF_MT \
+  -DCOMPRESS_PPMD \
+  -DCRYPTO_7ZAES \
+  -DCRYPTO_AES \
+  -DCRYPTO_ZIP
+
+
+DFLAGS=-MM \
+-I../../../myWindows \
+-I../../../ \
+-I../../../include_windows
+
+all:$(PROG)
+
+$(PROG): $(OBJS) $(MY_WINDOWS)
+ifneq (,$(findstring .so,$(PROG)))
+	@rm -f $(PROG:.so=.a)
+	@ar cr $(PROG:.so=.a) $(filter-out DllExports.o,$(OBJS))
+else
+	$(CXX) $(LOCAL_SHARED) -o $(PROG) $(LDFLAGS) $(OBJS) $(MY_WINDOWS) $(LIBS)
+endif
+
+include makefile.list
+include makefile.depend
+
+depend:
+	rm -f makefile.depend
+	$(CXX) $(DFLAGS) $(SRCS) > makefile.depend
+
+clean:
+	-@$(RM) $(PROG) $(PROG).exe *.o *~ .*.swp *.orig 
+	-@$(RM) -r SunWS_cache/ 
+	-@$(RM) -r .inslog2 pchdir/ tca.map

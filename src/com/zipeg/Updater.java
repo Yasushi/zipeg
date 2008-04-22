@@ -2,16 +2,16 @@ package com.zipeg;
 
 import java.io.*;
 import java.util.*;
-import java.util.prefs.BackingStoreException;
 
 public class Updater {
 
     // NOTE: (problem to have) if server trafic becomes and issue make it 7 DAYS
-    private static final long DAYS = 3L * 24L * 60 * 60 * 1000; // 3 DAYS = 3 * 24 hrs in milliseconds
+    public static final long DAYS = 3L * 24L * 60 * 60 * 1000; // 3 DAYS = 3 * 24 hrs in milliseconds
     private static final long HOURS = 3L * 60 * 60 * 1000; // 3 HOURS
     private static final String UPDATE = "http://www.zipeg.com/downloads/update.txt";
 
     private static final Object checkNow = new Object();
+    private static boolean requested;
     private static Thread checker;
     private static Thread downloader;
 
@@ -19,7 +19,8 @@ public class Updater {
     /**
      * @param now true if immediate check requested by UI
      * event
-     *      updateAvailable(Object[]{Int rev, Long nextUpdate, String ver, String url, String msg})
+     *      updateAvailable(Object[]{Int rev, String ver,
+     *                               String url, String msg, boolean immediate})
      * will be posted to dispatch thread. nextUpdate == 1 indicates that this
      * message is sent in response to checkForUpdate(true) otherwise
      * nextUpdate time will be != 1
@@ -28,13 +29,17 @@ public class Updater {
     public static void checkForUpdate(boolean now) {
         assert IdlingEventQueue.isDispatchThread();
         if (now) {
-            Presets.putLong("nextUpdate", 1);
+            Presets.putLong("nextUpdate", System.currentTimeMillis() - 1);
+            Presets.sync();
         }
         if (checker == null) {
             checker = newThread(new Checker(), "checker");
         }
         if (now) {
-            synchronized (checkNow) { checkNow.notify(); }
+            synchronized (checkNow) {
+                requested = now;
+                checkNow.notify();
+            }
         }
     }
 
@@ -60,7 +65,7 @@ public class Updater {
     /**
      * Downloads file from url and posts
      *      updateDownloaded(File file)
-     * event when done. 
+     * event when done.
      * @param url to download file from.
      */
     public static void download(String url) {
@@ -88,6 +93,8 @@ public class Updater {
 
     private static class Checker implements Runnable {
 
+        boolean immediate;
+
         public void run() {
             Debug.execute(new Runnable() {
                 public void run() { check(); }
@@ -96,19 +103,26 @@ public class Updater {
 
         public void check() {
             assert !IdlingEventQueue.isDispatchThread();
-            //noinspection InfiniteLoopStatement
             for (;;) {
                 synchronized (checkNow) {
                     try {
-                        checkNow.wait(1000 * 60); // wakes up once a minute
+                        checkNow.wait(1000 * 10); // wakes up once in 10 seconds
+                        immediate = requested;
+                        requested = false;
                     } catch (InterruptedException e) {
-                        /* ignore timeout */
+                        return;
                     }
                 }
+                long now = System.currentTimeMillis();
                 long nextUpdate = Presets.getLong("nextUpdate", 0);
-                if (System.currentTimeMillis() < nextUpdate) {
+                if (Debug.isDebug()) {
+                    assert nextUpdate > 0 : nextUpdate;
+                }
+                if (!immediate && now < nextUpdate) {
                     continue;
                 }
+                Debug.traceln("getLong(nextUpdate, " + new Date(nextUpdate) + ") lastUpdate " +
+                        new Date(Presets.getLong("lastUpdate", 0)));
                 Properties p = new Properties();
                 Throwable x = null;
                 boolean b = false;
@@ -126,9 +140,11 @@ public class Updater {
                         int ix = ver == null | url == null | msg == null ? -1 : ver.lastIndexOf('.');
                         int rev = ix >= 0 ? Integer.decode(ver.substring(ix + 1).trim()).intValue() : -1;
                         if (rev > 0) {
+                            Presets.putLong("lastUpdate", now);
                             Actions.postEvent("updateAvailable",
-                                    new Object[]{new Integer(rev), new Long(nextUpdate),
-                                                 ver, url, msg});
+                                    new Object[]{new Integer(rev),
+                                                 ver, url, msg,
+                                                 Boolean.valueOf(immediate)});
                         } else {
                             b = false;
                         }
@@ -138,14 +154,19 @@ public class Updater {
                 } catch (IOException e) {
                     x = e;
                 }
-                Presets.putLong("nextUpdate", System.currentTimeMillis() + (b ? DAYS : HOURS));
-                try {
-                    Presets.flush();
-                } catch (BackingStoreException e) {
-                    x = e;
+                if (nextUpdate < now - 100 * HOURS) {
+                    nextUpdate = now;
                 }
+                // evenly space update
+                long delta = b ? DAYS : HOURS;
+                while (nextUpdate < now + delta) {
+                    nextUpdate += delta;
+                }
+                Presets.putLong("nextUpdate", nextUpdate);
+                Debug.traceln("putLong(nextUpdate, " + new Date(nextUpdate) + ")");
+                Presets.flush();
                 if (x != null) {
-                    debugTrace(x); // enough for background thread
+                    Debug.printStackTrace("", x);
                 }
             }
         }

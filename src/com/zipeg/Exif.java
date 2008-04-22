@@ -118,7 +118,7 @@ public final class Exif { // see: http://www.exif.org/
             int tag = read(data, ifd, 2); ifd += 2;
             int type = read(data, ifd, 2); ifd += 2;
             int count = read(data, ifd, 4); ifd += 4;
-            if (count > data.b.length) {
+            if (count <= 0 || count > data.b.length) {
                 return -1;
             }
             long[] v = new long[count];

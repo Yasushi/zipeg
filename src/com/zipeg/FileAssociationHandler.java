@@ -1,5 +1,8 @@
 package com.zipeg;
 
+import java.util.Map;
+import java.util.HashMap;
+
 public interface FileAssociationHandler {
 
     /* Other known mac uti:
@@ -12,10 +15,21 @@ public interface FileAssociationHandler {
 
      */
 
+    static final Map aliases = new HashMap() {{
+        put("public.zip-archive", new String[]{"com.pkware.zip-archive",
+                "com.macitbetter.segmented-archive",
+                "com.macitbetter.zip-archive"});
+        put("com.public.cbz-archive", new String[]{"com.macitbetter.cbz-archive"});
+        put("public.archive.bzip2", new String[]{"org.bzip.bzip2-archive", "org.bzip.bzip2-tar-archive"});
+        put("public.arj-archive", new String[]{"org.7-zip.arj-archive"});
+        put("public.cpio-archive", new String[]{"com.apple.bom-compressed-cpio"});
+        put("public.lzh-archive", new String[]{"public.archive.lha", "org.7-zip.lha-archive"});
+    }};
+
     static final Object[][] ext2uti = new Object[][] {
             new Object[] {
                     "zip", "ZIP Archive", "http://en.wikipedia.org/wiki/Zip_%28file_format%29",
-                    "com.pkware.zip-archive",
+                    "public.zip-archive",
                     "application/zip", "application/x-zip", "application/x-zip-compressed" },
             new Object[] {
                     "7z", "7-zip Archive", "http://en.wikipedia.org/wiki/7z_%28file_format%29",
@@ -26,7 +40,7 @@ public interface FileAssociationHandler {
                     "com.rarlab.rar-archive", "application/x-rar-compressed" },
             new Object[] {
                     "bz2", "BZip2 Archive", "http://en.wikipedia.org/wiki/Bzip2",
-                    "org.bzip.bzip2-archive", "application/x-bzip" },
+                    "public.archive.bzip2", "application/x-bzip" },
             new Object[] {
                     "gz", "GNU Zip Archive", "http://en.wikipedia.org/wiki/Gzip",
                     "org.gnu.gnu-zip-archive", "application/gzip",

@@ -47,6 +47,7 @@ public final class ArchiveProcessor implements Archive {
     }
 
     private ArchiveProcessor() {
+        Z7.loadLibrary();
         thread = new Thread(new Runnable() {
             public void run() {
                 Debug.execute(new Runnable() {
@@ -149,17 +150,19 @@ public final class ArchiveProcessor implements Archive {
                     IdlingEventQueue.reportThreadIsWorking();
                     for (;;) {
                         Object r;
+                        Object[] params = null;
                         synchronized (queue) {
                             r = queue.isEmpty() ? null : queue.removeFirst();
+                            if ("open".equals(r) || "extract".equals(r) || "extractAndOpen".equals(r)) {
+                                params = (Object[])queue.removeFirst();
+                            }
                         }
                         if (r == null) {
                             break;
-                        }
-                        if ("stop".equals(r)) {
+                        } else if ("stop".equals(r)) {
                             die = true;
                             break;
                         } else if ("open".equals(r)) {
-                            Object[] params = (Object[])queue.removeFirst();
                             File file  = (File)params[0];
                             File cache = (File)params[1];
                             File parent = (File)params[2];
@@ -169,14 +172,12 @@ public final class ArchiveProcessor implements Archive {
                                 break;
                             }
                         } else if ("extract".equals(r)) {
-                            Object[] params = (Object[])queue.removeFirst();
                             if (params[1] instanceof File) {
                                 doExtract((List)params[0], (File)params[1], (Boolean)params[2]);
                             } else {
                                 doExtract((TreeElement)params[0], (Runnable)params[1]);
                             }
                         } else if ("extractAndOpen".equals(r)) {
-                            Object[] params = (Object[])queue.removeFirst();
                             List list = new ArrayList(1);
                             list.add(params[0]);
                             doExtract(list, (File)params[1], null, true, Boolean.FALSE);
@@ -438,6 +439,7 @@ public final class ArchiveProcessor implements Archive {
                 i++;
                 setProgress(i, m);
             }
+            // TODO: need to account for resource forks
             calculateCumulateCounts(ZERO);
             data.root = new ArchiveTreeNode(null, ZERO);
             data.root.fillCache();
@@ -649,6 +651,40 @@ public final class ArchiveProcessor implements Archive {
         };
     }
 
+    private Iterator iterateAllDirs() {
+
+        return new Iterator() {
+
+            Iterator e = data.zipfile.getEntries();
+            ZipEntry next = e.hasNext() ? (ZipEntry)e.next() : null;
+            {
+                skipNoneDirs();
+            }
+
+            public boolean hasNext() {
+                return next != null;
+            }
+
+            public Object next() {
+                Object r = next;
+                next = e.hasNext() ? (ZipEntry)e.next() : null;
+                skipNoneDirs();
+                return r;
+            }
+
+            public void remove() {
+                throw new UnsupportedOperationException("remove");
+            }
+
+            private void skipNoneDirs() {
+                while (next != null && (!next.isDirectory() || isAppleDouble(next.getName()))) {
+                    next = e.hasNext() ? (ZipEntry)e.next() : null;
+                }
+            }
+
+        };
+    }
+
     private void doExtract(List list, final File dir, Runnable done, boolean open, Boolean quit) {
         assert !IdlingEventQueue.isDispatchThread();
         String error = null;
@@ -657,7 +693,7 @@ public final class ArchiveProcessor implements Archive {
             set = new HashSet(list.size() * 2);
             for (Iterator i = list.iterator(); i.hasNext(); ) {
                 TreeElement e = (TreeElement)i.next();
-                assert !e.isDirectory();
+                assert !e.isDirectory() : e.getFile();
                 set.add(e.getFile());
             }
         }
@@ -729,14 +765,32 @@ public final class ArchiveProcessor implements Archive {
                 }
             }
             if (resources > 0) {
-                Process p = Runtime.getRuntime().exec(new String[]
+                Process p = Runtime.getRuntime().exec(
+                            new String[]
                             {"/System/Library/CoreServices/FixupResourceForks",
-                             "-q", Util.getCanonicalPath(dir)});
+                             "-q", Util.getCanonicalPath(dir)},
+                            Util.getEnvFilterOutMacCocoaCFProcessPath());
                 int ec = p.waitFor();
                 if (ec != 0) {
                     message = "error: fixing up resource forks for " +
                                Util.getCanonicalPath(dir) + " error code " + ec;
                     extracted -= resources;
+                }
+            }
+            // process empty directories:
+            if (list == null) {
+                for (Iterator dirs = iterateAllDirs(); dirs.hasNext(); ) {
+                    ZipEntry entry = (ZipEntry)dirs.next();
+                    final File file = new File(dir, entry.getName());
+                    try {
+                        data.zipfile.extractEntry(entry, file, data.password);
+                    } catch (IOException ignore) {
+                        // ignore
+                    }
+                    if (!file.exists()) {
+                        filename = Util.getCanonicalPath(file);
+                        new File(filename).mkdirs();
+                    }
                 }
             }
             if (extracted > 0 && message.length() == 0) {
@@ -826,7 +880,7 @@ public final class ArchiveProcessor implements Archive {
         }
         File parent = file.getParentFile();
         if (parent != null && !parent.isDirectory()) {
-            parent.mkdirs();
+            parent.mkdirs(); // TODO: set time from archive
         }
         if (cached != null && cached.canRead()) {
             Util.copyFile(cached, file);
@@ -839,6 +893,18 @@ public final class ArchiveProcessor implements Archive {
         if (entry.getTime() > 0) {
             file.setLastModified(entry.getTime());
         }
+/*
+        TODO: renameTo does not work :-(
+        if (Util.isMac() && "Icon[0D]".equals(file.getName())) {
+            try {
+                File icon = new File(file.getParent(), "Icon\r");
+                icon.delete();
+                file.renameTo(icon);
+            } catch (Throwable ignore) {
+                // ignore
+            }
+        }
+*/
         return 1;
     }
 
@@ -880,6 +946,8 @@ public final class ArchiveProcessor implements Archive {
                     file.delete();
                 }
             } else {
+                // TODO: does Linux has Trash can? Where is it?
+                // Is it the same in different distros?
                 file.delete(); // for now: Linux customers suppose to be tough guys
             }
         }
@@ -1104,6 +1172,7 @@ public final class ArchiveProcessor implements Archive {
             entry = data.zipfile.getEntry(path);
             res = Util.isMac() ? getResourceFork(path) : null;
             if (entry == null) { // happens for extra parents
+                // e.g. "memtest86-3.1a.iso" has no entries for "/" and "[BOOT]"
                 entry = new ZipEntry(path);
             }
             Set s = (Set)data.children.get(ix);

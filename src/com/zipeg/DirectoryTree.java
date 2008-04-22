@@ -66,7 +66,7 @@ public final class DirectoryTree extends JTree {
         TreePath path = getSelectionModel().getSelectionPath();
         TreePath parent = path == null ? null : path.getParentPath();
         if (parent != null) {
-            getSelectionModel().setSelectionPath(parent);            
+            getSelectionModel().setSelectionPath(parent);
         }
     }
 
@@ -136,6 +136,9 @@ public final class DirectoryTree extends JTree {
            !Zipeg.getArchive().isOpen()) {
             return;
         }
+        // TODO: (Leo) and even after that the archive async closing
+        // can still be racing the status bar. Think of it and make sure
+        // archive is never closed from the background thread.
         TreeNode node = (TreeNode)getLastSelectedPathComponent();
         TreeElement element = node == null ? null : (TreeElement)node;
         File file = element == null ? null : new File(element.getFile());
@@ -191,7 +194,11 @@ public final class DirectoryTree extends JTree {
             MainFrame.getInstance().setTitle(a.getName());
         }
         setSelectionInterval(0, 0);
-        requestFocus();
+        Util.invokeLater(200, new Runnable(){
+            public void run() {
+                requestFocus();
+            }
+        });
     }
 
     public void commandFileClose() {
@@ -220,7 +227,7 @@ public final class DirectoryTree extends JTree {
                                        40);
                 }
                 uicr.setBackgroundSelectionColor(isLastFocused() ? selection : dimmed);
-                if (Util.isWindows() && !isLastFocused()) {
+                if (!isLastFocused()) {
                     uicr.setForeground(uicr.getTextNonSelectionColor());
                 }
             }

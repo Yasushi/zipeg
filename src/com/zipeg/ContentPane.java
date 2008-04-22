@@ -30,7 +30,6 @@ public final class ContentPane extends JPanel {
         top.add(Actions.createToolBar(), BorderLayout.NORTH);
         dir = new DestinationComboBox();
         File unzipped = new File(Util.getDocuments(), "unarchived");
-        unzipped.mkdir();
         String s = Presets.get("destination", Util.getCanonicalPath(unzipped));
         dir.setText(s);
         dir.setAlignmentY(Component.CENTER_ALIGNMENT);
@@ -115,17 +114,17 @@ public final class ContentPane extends JPanel {
 
     public Insets getInsets() {
         Insets i = super.getInsets();
-        if (Util.isMac()) {
+        if (Util.isMac() && Util.getJavaVersion() < 1.6 && Util.getOsVersion() < 10.5) {
             i.left += 5;
             i.right += 5;
         }
         return i;
     }
-    
+
     public boolean inProgress() {
         return sb.inProgress();
     }
-    
+
     public void archiveOpened(Object param) {
         assert IdlingEventQueue.isDispatchThread();
         assert param instanceof Archive;
@@ -229,6 +228,7 @@ public final class ContentPane extends JPanel {
 
     public void saveDestination() {
         Presets.put("destination", dir.getText());
+        Presets.sync();
     }
 
     public void paint(Graphics g) {
@@ -275,10 +275,8 @@ public final class ContentPane extends JPanel {
             }
             System.setProperty("apple.awt.fileDialogForDirectories", "false");
         } else {
-            JFileChooser fc = FileChooser.getInstance();
-            if (target.isDirectory()) {
-                fc.setCurrentDirectory(target);
-            }
+            FileChooser fc = FileChooser.getInstance();
+            fc.setCurrentDirectory(target.isDirectory() ? target : Util.getDesktop());
             fc.setFileHidingEnabled(true);
             fc.setDialogTitle("Zipeg: Destination Folder");
             fc.setDialogType(JFileChooser.OPEN_DIALOG);
@@ -319,7 +317,7 @@ public final class ContentPane extends JPanel {
                     if (wc < mc) {
                         drag -= mc - wc;
                     }
-                    ContentPane.this.repaint();
+                    resize();
                 }
             }
         };
@@ -328,6 +326,7 @@ public final class ContentPane extends JPanel {
 
             public void mouseClicked(MouseEvent e) {
                 if (e.getClickCount() > 1) {
+                    // TODO: simplify me
                     int wp = tree.getPreferredSize().width;
                     int ww = west.getViewport().getWidth();
                     int cp = items.getPreferredSize().width;
@@ -370,30 +369,37 @@ public final class ContentPane extends JPanel {
             }
 
             public void mouseReleased(MouseEvent e) {
-                if (drag != 0) {
-                    int ww = west.getWidth() + drag;
-                    int mw = tree.getMinimumSize().width;
-                    if (ww < mw) {
-                        drag += mw - ww;
-                        ww = mw;
-                    }
-                    int wc = center.getWidth() - drag;
-                    int mc = items.getMinimumSize().width;
-                    if (wc < mc) {
-                        drag -= mc - wc;
-                        wc = mc;
-                    }
-                    west.setPreferredSize(new Dimension(ww, west.getPreferredSize().height));
-                    center.setPreferredSize(new Dimension(wc, center.getPreferredSize().height));
-                    ContentPane.this.revalidate();
-                    ContentPane.this.repaint();
-                    saveLayout();
-                }
-                drag = 0;
+                resize();
                 down = null;
+                repaint();
+            }
+
+        };
+
+        private void resize() {
+            if (drag != 0) {
+                // TODO: simplify me
+                int ww = west.getWidth() + drag;
+                int mw = tree.getMinimumSize().width;
+                if (ww < mw) {
+                    drag += mw - ww;
+                    ww = mw;
+                }
+                int wc = center.getWidth() - drag;
+                int mc = items.getMinimumSize().width;
+                if (wc < mc) {
+                    drag -= mc - wc;
+                    wc = mc;
+                }
+                west.setPreferredSize(new Dimension(ww, west.getPreferredSize().height));
+                center.setPreferredSize(new Dimension(wc, center.getPreferredSize().height));
+                ContentPane.this.revalidate();
+                ContentPane.this.repaint();
+                saveLayout();
+                drag = 0;
                 ContentPane.this.repaint();
             }
-        };
+        }
 
         public void addNotify() {
             super.addNotify();
@@ -441,6 +447,7 @@ public final class ContentPane extends JPanel {
         Presets.putInt("west.height", west.getPreferredSize().height);
         Presets.putInt("center.width", center.getPreferredSize().width);
         Presets.putInt("center.height", center.getPreferredSize().height);
+        Presets.sync();
     }
 
     private void restoreLayout() {
@@ -458,6 +465,7 @@ public final class ContentPane extends JPanel {
         sp.setBorder(null);
         sp.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS);
         sp.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_ALWAYS);
+        // TODO: BLT scroll mode does not work correctly. Why?
         sp.getViewport().setScrollMode(JViewport.SIMPLE_SCROLL_MODE);
         return sp;
     }

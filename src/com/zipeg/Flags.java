@@ -64,6 +64,7 @@ public class Flags {
     private static void saveFlags() {
 //      Debug.traceln("saveFlags " + Presets.getLong("flags", DEFAULT));
         Presets.putLong("flags", flags);
+        Presets.sync();
     }
 
 }

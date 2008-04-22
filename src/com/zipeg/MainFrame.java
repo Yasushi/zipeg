@@ -10,7 +10,7 @@ import java.awt.dnd.*;
 public final class MainFrame extends JFrame {
 
     private static final Rectangle DEFAULT = new Rectangle(48, 48, 800 - 48, 600 - 48);
-    private static final Dimension SMALLEST = new Dimension(340, 240);
+    private static final Dimension SMALLEST = new Dimension(480, 240);
     private static MainFrame frame = null;
     private static JFrame offscreen; // hosts menu when main frame is invisible. see setVisible
     private static final LinkedList cursors = new LinkedList();
@@ -122,7 +122,7 @@ public final class MainFrame extends JFrame {
     public boolean inProgress() {
         return ((ContentPane)getContentPane()).inProgress();
     }
-    
+
     public static JFrame getTopFrame() {
         if (frame != null && !frame.isVisible()) {
             frame.setVisible(true);
@@ -154,6 +154,7 @@ public final class MainFrame extends JFrame {
 
     public static void showError(Object param) {
         String text = (String)param;
+        // TODO: this is a good place to log errors.
         JOptionPane.showMessageDialog(MainFrame.getTopFrame(),
                 text, "Zipeg: Error", JOptionPane.ERROR_MESSAGE);
     }
@@ -204,6 +205,7 @@ public final class MainFrame extends JFrame {
         Presets.putInt("y", getY());
         Presets.putInt("width", getWidth());
         Presets.putInt("height", getHeight());
+        Presets.sync();
     }
 
     private void restoreLayout() {
