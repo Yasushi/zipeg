@@ -18,7 +18,8 @@ import javax.swing.filechooser.FileFilter;
 
 public final class Zipeg implements Runnable {
 
-    private static boolean plafInitialized = setSystemLookAndFeel("Zipeg", Flags.getFlag(Flags.METAL));
+    public static final String APPLICATION = "Zipeg";
+    private static boolean plafInitialized = setSystemLookAndFeel(APPLICATION, Flags.getFlag(Flags.METAL));
     private static ArrayList args = null;
     private static Set options = new HashSet();
     private static Archive archive = null;
@@ -70,6 +71,7 @@ public final class Zipeg implements Runnable {
             if (fa.isAvailable()) {
                 fa.setHandled(0);
 //              JOptionPane.showMessageDialog(null, "setHandled(0)");
+                Presets.flushNow();
                 System.exit(0);
             }
         }
@@ -195,19 +197,31 @@ public final class Zipeg implements Runnable {
                 firstRun = true;
             }
             Presets.putBoolean("licenseAccpeted", true);
-            Presets.sync();
+            Presets.flushNow();
         }
         loadRecent();
         if (firstRun) {
-            // first update in few days from installtion date
-            Presets.putLong("nextUpdate", System.currentTimeMillis() + Updater.DAYS);
             // Only once create installation guid
             if (Presets.get("zipeg.uuid", null) == null) {
+                Presets.switchToUserSettings(); // use file
+                Date now = new Date(System.currentTimeMillis());
+                Debug.trace("now=" + now.toString());
                 Presets.put("zipeg.uuid", Util.uuid());
-                Presets.sync();
+                Presets.put("zipeg.install.date", now.toString());
+                Presets.flushNow();
             }
+            // first update in few days from installtion date
+            Presets.putLong("nextUpdate", System.currentTimeMillis() + Updater.DAYS);
+            Presets.putBoolean("licenseAccpeted", true);
+            Presets.flushNow();
 //          Util.sleep(2 * 1000);
 //          JOptionPane.showMessageDialog(null, "first run", "Zipeg Setup", JOptionPane.INFORMATION_MESSAGE);
+        }
+        Z7.loadLibrary();
+        if (Util.isWindows()) {
+            Registry.loadLibrary();
+        } else {
+            DefaultRoleHandler.loadLibrary();
         }
         Updater.cleanUpdateFiles();
         Updater.checkForUpdate(false);
@@ -346,6 +360,7 @@ public final class Zipeg implements Runnable {
                 public void run() {
                     MainFrame.getInstance().dispose();
                     Util.rmdirs(Util.getCacheDirectory());
+                    Presets.flushNow();
                     System.exit(0);
                 }
             });
@@ -402,6 +417,8 @@ public final class Zipeg implements Runnable {
 
     public static void commandHelpDonate() {
         Debug.traceln("commandHepDonate");
+        int donate_count = Presets.getInt("donate.count", 0);
+        Presets.putInt("donate.count", donate_count + 1);
         if (Util.isMac()) {
             Util.openUrl("http://www.zipeg.com/mac.donate.html");
         } else {
@@ -485,6 +502,11 @@ public final class Zipeg implements Runnable {
         updating--;
     }
 
+    private static void updated() {
+        int update_count = Presets.getInt("update.count", 0);
+        Presets.putInt("update.count", update_count + 1);
+    }
+
     /**
      * updateDownloaded event handler is invoked aftet update has been downloaded
      * @param param - file into which update has been downloaded
@@ -502,13 +524,14 @@ public final class Zipeg implements Runnable {
         if (Util.isWindows()) {
             try {
                 Runtime.getRuntime().exec(Util.getCanonicalPath(file));
+                updated();
             } catch (IOException e) {
                 redownload();
                 throw new Error(e);
             }
+            Presets.flushNow();
             System.exit(0);
-        }
-        else {
+        } else {
             File wd = new File(Util.getCanonicalPath(new File(".")));
             String location = "CopyAndRestart.class";
             InputStream i = null;
@@ -533,6 +556,8 @@ public final class Zipeg implements Runnable {
                 Runtime.getRuntime().exec(new String[]{ java, "com.zipeg.CopyAndRestart",
                                           Util.getCanonicalPath(file),
                                           Util.getCanonicalPath(wd), java});
+                updated();
+                Presets.flushNow();
                 System.exit(0);
             } catch (IOException e) {
                 throw new Error(e);
@@ -1078,17 +1103,39 @@ public final class Zipeg implements Runnable {
         return true;
     }
 
-
     static void redownload() {
-        JOptionPane.showMessageDialog(MainFrame.getTopFrame(),
-                "This installation of Zipeg is corrupted\n" +
-                "Please download and reinstall Zipeg\n" +
-                "from http://www.zipeg.com\n" +
-                "Application will quit now.",
-                "Zipeg: Fatal Error", JOptionPane.ERROR_MESSAGE);
-        Util.openUrl("http://www.zipeg.com");
+        File cd = new File(System.getProperty("user.dir"));
+        if (Util.isMac() && !cd.isDirectory()) {
+            JOptionPane.showMessageDialog(MainFrame.getTopFrame(),
+                    "Zipeg has been moved from current location.\n" +
+                    "Please restart Zipeg from the folder it has been moved to\n" +
+                    "(e.g. /Applications/Zipeg.app).\n" +
+                    "Application will quit now.",
+                    "Zipeg: Warning", JOptionPane.WARNING_MESSAGE);
+            File zipeg = new File("/Applications/Zipeg.app");
+            if (zipeg.isDirectory()) {
+               long time = zipeg.lastModified();
+               long now = System.currentTimeMillis();
+               if (Math.abs(time - now) < 60 * 1000 * 1000) {
+                   try {
+                       Runtime.getRuntime().exec("open -a /Applications/Zipeg.app");
+                   } catch (IOException e) {
+                       // ignore
+                   }
+               }
+            }
+        } else {
+            JOptionPane.showMessageDialog(MainFrame.getTopFrame(),
+                    "This installation of Zipeg is corrupted\n" +
+                    "Please download and reinstall Zipeg\n" +
+                    "from http://www.zipeg.com\n" +
+                    "Application will quit now.",
+                    "Zipeg: Fatal Error", JOptionPane.ERROR_MESSAGE);
+            Util.openUrl("http://www.zipeg.com");
+        }
         System.exit(1);
     }
+
 }
 
 /*

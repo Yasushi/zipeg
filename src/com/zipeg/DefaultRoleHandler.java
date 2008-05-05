@@ -176,7 +176,7 @@ public class DefaultRoleHandler implements FileAssociationHandler {
         return result;
     }
 
-    private static void loadLibrary() {
+    static void loadLibrary() {
         if (Util.getOsVersion() < 10.4) {
             // Mac OS 10.3.9 does not support LSCopyDefaultRoleHandlerForContentType
             error = true;

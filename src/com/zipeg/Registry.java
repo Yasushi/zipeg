@@ -558,7 +558,7 @@ public class Registry implements FileAssociationHandler {
         return (Long)getValue(key, subkey);
     }
 
-    private static void loadLibrary() {
+    static void loadLibrary() {
         if (loaded) {
             return;
         }

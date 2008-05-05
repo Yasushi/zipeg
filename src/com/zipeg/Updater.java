@@ -115,8 +115,16 @@ public class Updater {
                 }
                 long now = System.currentTimeMillis();
                 long nextUpdate = Presets.getLong("nextUpdate", 0);
-                if (Debug.isDebug()) {
-                    assert nextUpdate > 0 : nextUpdate;
+                if (nextUpdate == 0) {
+                    // evenly space update
+                    long delta = HOURS;
+                    while (nextUpdate < now + delta) {
+                        nextUpdate += delta;
+                    }
+                    Presets.putLong("nextUpdate", nextUpdate);
+                    Debug.traceln("Warning: nextUpdate==0 putLong(nextUpdate, " + new Date(nextUpdate) + ")");
+                    Presets.flushNow();
+                    continue;
                 }
                 if (!immediate && now < nextUpdate) {
                     continue;

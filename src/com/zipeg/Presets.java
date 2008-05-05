@@ -5,50 +5,83 @@ import java.util.prefs.*;
 
 public class Presets {
 
-    private static final Preferences user = Preferences.userNodeForPackage(Zipeg.class).node(System.getProperty("user.name"));
+    private static boolean useUserSettings = testUserSettings();
+    private static final Preferences user = useUserSettings ? null : Preferences.userNodeForPackage(Zipeg.class).node(System.getProperty("user.name"));
 
     public static void put(String key, String value) {
-        user.put(key, value);
+        if (useUserSettings) {
+            UserSettings.put(key, value);
+        } else {
+            user.put(key, value);
+        }
     }
 
     public static void putInt(String key, int value) {
-        user.putInt(key, value);
+        if (useUserSettings) {
+            UserSettings.putInt(key, value);
+        } else {
+            user.putInt(key, value);
+        }
     }
 
     public static void putLong(String key, long value) {
-        user.putLong(key, value);
+        if (useUserSettings) {
+            UserSettings.putLong(key, value);
+        } else {
+            user.putLong(key, value);
+        }
     }
 
     public static void putBoolean(String key, boolean value) {
-        user.putBoolean(key, value);
+        if (useUserSettings) {
+            UserSettings.putBoolean(key, value);
+        } else {
+            user.putBoolean(key, value);
+        }
     }
 
     public static String get(String key, String value) {
-        return user.get(key, value);
+        return useUserSettings ? UserSettings.get(key, value) : user.get(key, value);
     }
 
     public static int getInt(String key, int value) {
-        return user.getInt(key, value);
+        return useUserSettings ? UserSettings.getInt(key, value) : user.getInt(key, value);
     }
 
     public static long getLong(String key, long value) {
-        return user.getLong(key, value);
+        return useUserSettings ? UserSettings.getLong(key, value) : user.getLong(key, value);
     }
 
     public static boolean getBoolean(String key, boolean value) {
-        return user.getBoolean(key, value);
+        return useUserSettings ? UserSettings.getBoolean(key, value) : user.getBoolean(key, value);
     }
 
     public static void clear() {
+        if (useUserSettings) {
+            UserSettings.clear();
+            return;
+        }
         try {
             user.clear();
             sync();
         } catch (BackingStoreException e) {
-            throw new Error(e);
+            switchToUserSettings();
+        }
+    }
+
+    public static void flushNow() {
+        if (useUserSettings) {
+            UserSettings.flushNow();
+        } else {
+            flush();
         }
     }
 
     public static void flush() {
+        if (useUserSettings) {
+            UserSettings.flush();
+            return;
+        }
         int retry = 4;
         for (;;) {
             try {
@@ -56,8 +89,9 @@ public class Presets {
                 user.flush();
                 return;
             } catch (BackingStoreException e) {
-                if (retry == 0) {
-                    throw new Error(e);
+                if (retry <= 0) {
+                    switchToUserSettings();
+                    return;
                 } else {
                     Util.sleep((int)(Math.random() * 100) + 10);
                 }
@@ -66,6 +100,10 @@ public class Presets {
     }
 
     public static void sync() {
+        if (useUserSettings) {
+            UserSettings.sync();
+            return;
+        }
         int retry = 4;
         for (;;) {
             try {
@@ -73,8 +111,9 @@ public class Presets {
                 user.sync();
                 return;
             } catch (BackingStoreException e) {
-                if (retry == 0) {
-                    throw new Error(e);
+                if (retry <= 0) {
+                    switchToUserSettings();
+                    return;
                 } else {
                     Util.sleep((int)(Math.random() * 100) + 10);
                 }
@@ -82,4 +121,19 @@ public class Presets {
         }
     }
 
+    private static boolean testUserSettings() {
+        try {
+            UserSettings.put("test", "test");
+            UserSettings.flushNow();
+            return UserSettings.getBoolean("useUserSettings", false);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    public static void switchToUserSettings() {
+        UserSettings.putBoolean("useUserSettings", true);
+        UserSettings.flushNow();
+        useUserSettings = true;
+    }
 }
