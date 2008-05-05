@@ -143,11 +143,12 @@ public final class Actions extends HashMap {
         tb.addSeparator(new Dimension(10, 1));
         addButton(tb, "preferences", "commandToolsOptions", Util.isMac() ? "Preferences." : "Zipeg options.");
         addSpacer(tb, 10);
-        int count = Presets.getInt("extract.count", 0);
-        if (count > 89) {
+        int extract_count = Presets.getInt("extract.count", 0);
+        int donate_count = Presets.getInt("donate.count", 0);
+        if (extract_count > 153 && donate_count < 3) {
             addButton(tb, "donate", "commandHelpDonate",
                     "<html><body>" +
-                    "<center>&nbsp;Zipeg helped you with " + count + " archives.&nbsp;</center>" +
+                    "<center>&nbsp;Zipeg helped you with " + extract_count + " archives.&nbsp;</center>" +
                     "<center>&nbsp;Could you please help Zipeg development&nbsp;<br>&nbsp;with a small donation?&nbsp;</center>" +
                     "<center>&nbsp;Thank you!&nbsp;</center><br>" +
                     "</body></html>");

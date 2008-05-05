@@ -121,6 +121,35 @@ public final class Util {
         return desktop;
     }
 
+    public static File getUserPreferences() {
+        File p;
+        if (isMac()) {
+            p = new File(getHome(), "Library/Preferences");
+/*
+            try {
+                String up = MacOSX.findFolder(MacOSX.kUserDomain, MacOSX.kPreferencesFolderType, true);
+                p = new File(up);
+            } catch (IOException e) {
+                Debug.printStackTrace("", e);
+                p = new File(getHome(), "Library/Preferences");
+            }
+*/
+        } else if (isWindows()) {
+            // TODO: ShGetSpecialFolder is a better way:
+            p = new File(getHome(), "Local Settings\\Application Data");
+        } else {
+            // TODO: for Un*x there should be some kind of standard:
+            p = new File(getHome(), ".java-apps-user-prefs");
+        }
+        try {
+            p = p.getCanonicalFile();
+            p.mkdirs();
+            return p;
+        } catch (IOException e) {
+            throw new Error(e);
+        }
+    }
+    
     public static File getTmp() {
         if (tmp == null) {
             try {

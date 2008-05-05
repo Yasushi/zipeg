@@ -10,6 +10,14 @@ import java.util.zip.ZipEntry;
 
 public final class Resources {
 
+    /* On Mac OS X 10.5 non priviliged user may (and will) download application
+       on Desktop or Downloads folder, start it and, while it is running,
+       move it to /Applications folder. Unless jar file is kept open this
+       move will proceed and next call to any ClassLoader.getResourceAsStream
+       will fail. Thus, deliberatly keep jar file open.
+    */
+    private static JarFile jar;
+
     public static ImageIcon getImageIcon(String name) {
         return new ImageIcon(getImage(name));
     }
@@ -59,6 +67,21 @@ public final class Resources {
         return readBytes(location);
     }
 
+    private static JarFile getJarFile(String u) throws IOException {
+        if (jar == null) {
+            int sep = u.lastIndexOf('!');
+            String j = u.substring(0, sep);
+            if (j.startsWith("jar:file:")) {
+                j = j.substring("jar:file:".length());
+            }
+            if (j.startsWith("file:")) {
+                j = j.substring("file:".length());
+            }
+            jar = new JarFile(j);
+        }
+        return jar;
+    }
+
     public static InputStream getResourceAsStream(String location) {
         try {
             java.net.URL url = Resources.class.getResource(location);
@@ -67,17 +90,8 @@ public final class Resources {
             InputStream s;
             // see: http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=4730642
             if (u.toLowerCase().indexOf(".jar!/") >= 0) {
-                int sep = u.lastIndexOf('!');
-                String j = u.substring(0, sep);
-                if (j.startsWith("jar:file:")) {
-                    j = j.substring("jar:file:".length());
-                }
-                if (j.startsWith("file:")) {
-                    j = j.substring("file:".length());
-                }
-                String e = u.substring(sep + 2);
-                JarFile jar = new JarFile(j);
-                ZipEntry ze = jar.getEntry(e);
+                JarFile jar = getJarFile(u);
+                ZipEntry ze = jar.getEntry(u.substring(u.lastIndexOf('!') + 2));
                 s = jar.getInputStream(ze);
             } else {
                 s = Resources.class.getResourceAsStream(location);

@@ -78,6 +78,12 @@ public final class Debug {
         }
     }
 
+    public static void printStackTrace(Throwable t) {
+        if (Debug.isDebug()) {
+            t.printStackTrace();
+        }
+    }
+
     public static boolean isDebug() {
         return debug;
     }
@@ -115,6 +121,14 @@ public final class Debug {
         }
 
         public static void report(Throwable x) {
+            int crash_count = 0;
+            try {
+                crash_count = Presets.getInt("crash.count", 0);
+                crash_count++;
+                Presets.putInt("crash.count", crash_count);
+            } catch (Throwable ignore) {
+                // ignore
+            }
             if (Util.isMac()) {
                 String cd = System.getProperty("user.dir");
                 if (cd.toLowerCase().indexOf(".dmg/") >= 0) {
@@ -175,6 +189,19 @@ public final class Debug {
             if (isIgnorable(cause, body)) {
                 reported = false;
                 return;
+            }
+            try {
+                String install_date = Presets.get("zipeg.install.date", "");
+                int extract_count = Presets.getInt("extract.count", 0);
+                int donate_count = Presets.getInt("donate.count", 0);
+                int update_count = Presets.getInt("update.count", 0);
+                String uuid = Presets.get("zipeg.uuid", "");
+                body += "\r\ninstalled: " + install_date +
+                        " [x" + extract_count + ":d" + donate_count +
+                        ":c" + crash_count + ":u" + update_count + "] " +
+                        uuid + "\r\n";
+            } catch (Throwable ignore) {
+                // ignore
             }
             report(subject, body);
             if (Util.getCacheDirectory().toString().indexOf("com.zipeg") > 0) {
@@ -325,6 +352,7 @@ public final class Debug {
                     msg.indexOf("BasicTextUI.damageRange") >= 0 ||
                     msg.indexOf("null pData") >= 0 ||
                     msg.indexOf("disposed component") >= 0 ||
+                    msg.indexOf("com.sun.java.swing.plaf.windows.XPStyle$Skin") >= 0 ||
                     msg.indexOf("FilePane$2.repaintListSelection") >= 0) {
                     return true;
                 }
